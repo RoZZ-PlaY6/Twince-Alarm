@@ -10,9 +10,9 @@ The Android alarm engine stays in this app. Flutter talks to it on the method ch
 
 The workflow pins Flutter 3.47.8 stable (Dart 3.13.7), the SDK this project was created with, and Java 17, which matches the Android Gradle Plugin 9.1.0 project.
 
-### Default branch placeholder
+### Branch triggers
 
-This folder is not a Git repository, so the default branch could not be read from local Git metadata. The workflow triggers pushes and pull requests for a branch named `REPLACE_WITH_DEFAULT_BRANCH`. Before you rely on those automatic runs, replace that name in `.github/workflows/android-debug-apk.yml` with the repository’s real default branch. Manual runs do not depend on that name.
+This folder is not a Git repository, so the default branch could not be read from local Git metadata. The workflow therefore does not filter `push` or `pull_request` by branch name: it runs on pushes and pull requests to any branch, and is not silently gated on an assumed branch such as `main` or `master`. Manual runs (`workflow_dispatch`) work on any branch and do not depend on a branch name. If you want to scope automatic runs to the repository's real default branch, add a `branches:` filter to `push` and `pull_request` in `.github/workflows/android-debug-apk.yml`.
 
 ### Review and push with GitHub Desktop
 
@@ -25,7 +25,7 @@ This folder is not a Git repository, so the default branch could not be read fro
 
 1. After the workflow file is on the repository’s default branch, open the repository on GitHub and go to the **Actions** tab.
 2. Select **Android debug APK** in the workflow list.
-3. The workflow also starts on a push or pull request that targets the branch named in the file. To start it yourself, click **Run workflow**, choose the branch that contains the workflow, and confirm.
+3. The workflow also starts on a push or pull request to any branch. To start it yourself, click **Run workflow**, choose the branch that contains the workflow, and confirm.
 
 A green check on that run is the confirmation that GitHub built the APK. A local build on another machine does not mean the Actions run passed.
 

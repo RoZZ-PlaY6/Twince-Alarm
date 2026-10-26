@@ -12,11 +12,13 @@
 # and Android Gradle Plugin 9.1.0 (settings.gradle.kts) runs on JDK 17.
 # The Gradle wrapper is 9.3.1, which is the wrapper AGP 9.1.0 requires.
 #
-# Default branch: this working directory is not a Git repository, so the
-# default branch could not be read from local Git metadata. There is no
-# .git directory and no origin/HEAD. Replace every REPLACE_WITH_DEFAULT_BRANCH
-# below with the repository's real default branch before relying on push or
-# pull_request triggers. workflow_dispatch does not use that name.
+# Default branch: this working directory is not a Git repository (no .git),
+# so the default branch could not be read from local Git metadata. The push
+# and pull_request triggers below therefore do not filter by branch name, so
+# the workflow is not silently gated on an assumed branch such as main or
+# master. workflow_dispatch runs manually on any branch and does not use a
+# branch name. Review the repository's real default branch on GitHub and add
+# `branches:` back to push/pull_request if you want to scope triggers to it.
 #
 # The Flutter project root is the repository root (pubspec.yaml). The debug
 # APK is written to build/app/outputs/flutter-apk/app-debug.apk.
@@ -25,11 +27,7 @@ name: Android debug APK
 
 on:
   push:
-    branches:
-      - REPLACE_WITH_DEFAULT_BRANCH
   pull_request:
-    branches:
-      - REPLACE_WITH_DEFAULT_BRANCH
   workflow_dispatch:
 
 permissions:
