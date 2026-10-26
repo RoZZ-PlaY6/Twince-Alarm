@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Twince Alarm</string>
+    <string name="dismiss">Dismiss</string>
+    <string name="restart">Restart</string>
+    <string name="snooze_5">Snooze 5 minutes</string>
+    <string name="snooze_10">Snooze 10 minutes</string>
+    <string name="perm_control_label">Control Twince alarms</string>
+    <string name="perm_control_desc">Create and cancel alarms in Twince Alarm.</string>
+    <string name="perm_listen_label">Listen for Twince alarm events</string>
+    <string name="perm_listen_desc">Receive dismiss, snooze, and restart events from Twince Alarm.</string>
+</resources>
