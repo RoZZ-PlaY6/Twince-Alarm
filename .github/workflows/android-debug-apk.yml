@@ -1,0 +1,91 @@
+# Builds one installable debug APK for Twince Alarm (com.twince.alarm).
+#
+# This is a test build signed with Android's automatic debug keystore.
+# It does not use a release keystore, GitHub secrets, or Play signing.
+#
+# Flutter pin: 3.47.8 stable (Dart 3.13.7). This matches the local SDK that
+# created the project (.metadata revision 737ba8f885, channel stable) and
+# pubspec.yaml's sdk constraint (^3.13.7). The repository has no .fvmrc or
+# other Flutter version file.
+#
+# Java pin: Temurin 17. android/app/build.gradle.kts compiles with Java 17,
+# and Android Gradle Plugin 9.1.0 (settings.gradle.kts) runs on JDK 17.
+# The Gradle wrapper is 9.3.1, which is the wrapper AGP 9.1.0 requires.
+#
+# Default branch: this working directory is not a Git repository, so the
+# default branch could not be read from local Git metadata. There is no
+# .git directory and no origin/HEAD. Replace every REPLACE_WITH_DEFAULT_BRANCH
+# below with the repository's real default branch before relying on push or
+# pull_request triggers. workflow_dispatch does not use that name.
+#
+# The Flutter project root is the repository root (pubspec.yaml). The debug
+# APK is written to build/app/outputs/flutter-apk/app-debug.apk.
+
+name: Android debug APK
+
+on:
+  push:
+    branches:
+      - REPLACE_WITH_DEFAULT_BRANCH
+  pull_request:
+    branches:
+      - REPLACE_WITH_DEFAULT_BRANCH
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Flutter 3.47.8
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.8"
+          channel: stable
+          cache: true
+
+      - name: Install Dart packages
+        run: flutter pub get
+
+      - name: Make the Gradle wrapper executable
+        run: chmod +x android/gradlew
+
+      # Headless runners still need the SDK licenses accepted before Gradle
+      # can download platform or NDK packages. pipefail is disabled so `yes`
+      # receiving SIGPIPE does not hide a real failure from flutter doctor.
+      - name: Accept Android SDK licenses
+        run: |
+          set +o pipefail
+          yes | flutter doctor --android-licenses
+
+      - name: Build debug APK
+        run: flutter build apk --debug
+
+      - name: Name the APK artifact
+        id: apk
+        run: echo "name=Twince-Alarm-debug-${GITHUB_SHA::0:7}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.apk.outputs.name }}
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14

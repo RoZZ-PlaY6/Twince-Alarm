@@ -1,2 +1,2 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Keep the Unix Gradle script as LF so GitHub Actions can execute it.
+android/gradlew text eol=lf
