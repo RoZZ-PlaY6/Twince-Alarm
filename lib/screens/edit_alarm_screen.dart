@@ -4,6 +4,7 @@ import 'package:twince_alarm/models/alarm_item.dart';
 import 'package:twince_alarm/screens/ringing_screen.dart';
 import 'package:twince_alarm/services/alarm_bridge.dart';
 import 'package:twince_alarm/theme/twince_theme.dart';
+import 'package:twince_alarm/widgets/sound_picker.dart';
 
 class EditAlarmScreen extends StatefulWidget {
   const EditAlarmScreen({super.key, this.alarm});
@@ -41,7 +42,9 @@ class _EditAlarmScreenState extends State<EditAlarmScreen> {
     _soundName = 'Default alarm';
     _days = [...?alarm?.repeatDays];
     _label = TextEditingController(text: alarm?.label ?? '');
-    _subtitle = TextEditingController(text: alarm?.subtitle ?? 'Time to start your task');
+    _subtitle = TextEditingController(
+      text: alarm?.subtitle ?? 'Time to start your task',
+    );
     _loadSounds();
   }
 
@@ -67,47 +70,27 @@ class _EditAlarmScreenState extends State<EditAlarmScreen> {
       setState(() {
         _sounds = sounds;
         final match = sounds.where((sound) => sound.uri == _soundUri);
-        _soundName = match.isEmpty ? (_soundUri.isEmpty ? 'Default alarm' : 'Custom tone') : match.first.name;
+        _soundName = match.isEmpty
+            ? (_soundUri.isEmpty ? 'Default alarm' : 'Custom tone')
+            : match.first.name;
       });
     } on PlatformException {
       // The default tone stays selected.
     }
   }
 
-  Future<void> _pickSound() async {
-    final selected = await showModalBottomSheet<AlarmSound>(
+  Future<void> _pickSound() {
+    return SoundPicker.open(
       context: context,
-      backgroundColor: const Color(0xFF121628),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (context) {
-        return SafeArea(
-          child: ListView(
-            children: [
-              const Padding(
-                padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
-                child: Text('Alarm sound', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-              ),
-              ..._sounds.map((sound) {
-                return ListTile(
-                  title: Text(sound.name),
-                  trailing: sound.uri == _soundUri ? const Icon(Icons.check, color: TwinceColors.cyan) : null,
-                  onTap: () async {
-                    await _bridge.previewSound(sound.uri);
-                    if (context.mounted) Navigator.pop(context, sound);
-                  },
-                );
-              }),
-            ],
-          ),
-        );
+      sounds: _sounds,
+      selectedUri: _soundUri,
+      onSelected: (sound) {
+        setState(() {
+          _soundUri = sound.uri;
+          _soundName = sound.name;
+        });
       },
     );
-    await _bridge.stopPreview();
-    if (selected == null || !mounted) return;
-    setState(() {
-      _soundUri = selected.uri;
-      _soundName = selected.name;
-    });
   }
 
   Future<void> _save() async {
@@ -118,18 +101,23 @@ class _EditAlarmScreenState extends State<EditAlarmScreen> {
       hour: _hour,
       minute: _minute,
       label: _label.text.trim().isEmpty ? 'Alarm' : _label.text.trim(),
-      subtitle: _subtitle.text.trim().isEmpty ? 'Time to start your task' : _subtitle.text.trim(),
+      subtitle: _subtitle.text.trim().isEmpty
+          ? 'Time to start your task'
+          : _subtitle.text.trim(),
       enabled: widget.alarm?.enabled ?? true,
       vibrate: _vibrate,
       soundUri: _soundUri,
       repeatDays: _days,
+      weekTags: widget.alarm?.weekTags ?? const [],
     );
     try {
       final saved = await _bridge.upsert(draft);
       if (!mounted) return;
       if (saved.scheduleError.isNotEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Saved. Allow exact alarms so it can fire on time.')),
+          const SnackBar(
+            content: Text('Saved. Allow exact alarms so it can fire on time.'),
+          ),
         );
       }
       Navigator.pop(context, true);
@@ -152,8 +140,14 @@ class _EditAlarmScreenState extends State<EditAlarmScreen> {
           title: const Text('Delete alarm?'),
           content: Text(alarm.label),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-            TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Delete'),
+            ),
           ],
         );
       },
@@ -201,13 +195,19 @@ class _EditAlarmScreenState extends State<EditAlarmScreen> {
                       child: Text(
                         editing ? 'Edit alarm' : 'Add alarm',
                         textAlign: TextAlign.center,
-                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
                     if (editing)
                       IconButton(
                         onPressed: _delete,
-                        icon: const Icon(Icons.delete_outline, color: TwinceColors.muted),
+                        icon: const Icon(
+                          Icons.delete_outline,
+                          color: TwinceColors.muted,
+                        ),
                       )
                     else
                       const SizedBox(width: 48),
@@ -230,7 +230,10 @@ class _EditAlarmScreenState extends State<EditAlarmScreen> {
                     Center(
                       child: Text(
                         formatClock(_hour, _minute, use24: _use24),
-                        style: const TextStyle(color: TwinceColors.cyan, fontWeight: FontWeight.w600),
+                        style: const TextStyle(
+                          color: TwinceColors.cyan,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 20),
@@ -238,7 +241,10 @@ class _EditAlarmScreenState extends State<EditAlarmScreen> {
                     const SizedBox(height: 12),
                     _field(_subtitle, 'Message', 'Time to start your task'),
                     const SizedBox(height: 18),
-                    const Text('Repeat', style: TextStyle(fontWeight: FontWeight.w700)),
+                    const Text(
+                      'Repeat',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
                     const SizedBox(height: 10),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -255,19 +261,32 @@ class _EditAlarmScreenState extends State<EditAlarmScreen> {
                             alignment: Alignment.center,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: selected ? TwinceColors.cyan : Colors.transparent,
+                              color: selected
+                                  ? TwinceColors.cyan
+                                  : Colors.transparent,
                               border: Border.all(
-                                color: selected ? TwinceColors.cyan : TwinceColors.stroke,
+                                color: selected
+                                    ? TwinceColors.cyan
+                                    : TwinceColors.stroke,
                               ),
                               boxShadow: selected
-                                  ? [BoxShadow(color: TwinceColors.cyan.withValues(alpha: 0.35), blurRadius: 10)]
+                                  ? [
+                                      BoxShadow(
+                                        color: TwinceColors.cyan.withValues(
+                                          alpha: 0.35,
+                                        ),
+                                        blurRadius: 10,
+                                      ),
+                                    ]
                                   : null,
                             ),
                             child: Text(
                               letters[index],
                               style: TextStyle(
                                 fontWeight: FontWeight.w700,
-                                color: selected ? const Color(0xFF041018) : TwinceColors.text,
+                                color: selected
+                                    ? const Color(0xFF041018)
+                                    : TwinceColors.text,
                               ),
                             ),
                           ),
@@ -275,13 +294,22 @@ class _EditAlarmScreenState extends State<EditAlarmScreen> {
                       }),
                     ),
                     const SizedBox(height: 8),
-                    Text(repeatLabel(_days), style: const TextStyle(color: TwinceColors.muted)),
+                    Text(
+                      repeatLabel(_days),
+                      style: const TextStyle(color: TwinceColors.muted),
+                    ),
                     const SizedBox(height: 8),
                     ListTile(
                       contentPadding: EdgeInsets.zero,
                       title: const Text('Sound'),
-                      subtitle: Text(_soundName, style: const TextStyle(color: TwinceColors.muted)),
-                      trailing: const Icon(Icons.chevron_right, color: TwinceColors.muted),
+                      subtitle: Text(
+                        _soundName,
+                        style: const TextStyle(color: TwinceColors.muted),
+                      ),
+                      trailing: const Icon(
+                        Icons.chevron_right,
+                        color: TwinceColors.muted,
+                      ),
                       onTap: _pickSound,
                     ),
                     SwitchListTile(
@@ -290,14 +318,20 @@ class _EditAlarmScreenState extends State<EditAlarmScreen> {
                       value: _vibrate,
                       onChanged: (value) => setState(() => _vibrate = value),
                       thumbColor: WidgetStateProperty.resolveWith((states) {
-                        if (states.contains(WidgetState.selected)) return TwinceColors.bg0;
+                        if (states.contains(WidgetState.selected)) {
+                          return TwinceColors.bg0;
+                        }
                         return TwinceColors.muted;
                       }),
                       trackColor: WidgetStateProperty.resolveWith((states) {
-                        if (states.contains(WidgetState.selected)) return TwinceColors.cyan;
+                        if (states.contains(WidgetState.selected)) {
+                          return TwinceColors.cyan;
+                        }
                         return const Color(0xFF2A3148);
                       }),
-                      trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
+                      trackOutlineColor: const WidgetStatePropertyAll(
+                        Colors.transparent,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     TextButton(
@@ -308,7 +342,9 @@ class _EditAlarmScreenState extends State<EditAlarmScreen> {
                             builder: (_) => RingingScreen(
                               hour: _hour,
                               minute: _minute,
-                              title: _label.text.trim().isEmpty ? 'Alarm' : _label.text.trim(),
+                              title: _label.text.trim().isEmpty
+                                  ? 'Alarm'
+                                  : _label.text.trim(),
                               subtitle: _subtitle.text.trim().isEmpty
                                   ? 'Time to start your task'
                                   : _subtitle.text.trim(),
@@ -374,9 +410,17 @@ class _TimeWheels extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hourLabels = use24
-        ? [for (var value = 0; value < 24; value++) value.toString().padLeft(2, '0')]
-        : [for (var value = 1; value <= 12; value++) value.toString().padLeft(2, '0')];
-    final minuteLabels = [for (var value = 0; value < 60; value++) value.toString().padLeft(2, '0')];
+        ? [
+            for (var value = 0; value < 24; value++)
+              value.toString().padLeft(2, '0'),
+          ]
+        : [
+            for (var value = 1; value <= 12; value++)
+              value.toString().padLeft(2, '0'),
+          ];
+    final minuteLabels = [
+      for (var value = 0; value < 60; value++) value.toString().padLeft(2, '0'),
+    ];
     final hour12 = hour % 12 == 0 ? 12 : hour % 12;
     final pm = hour >= 12;
     return SizedBox(
@@ -390,7 +434,9 @@ class _TimeWheels extends StatelessWidget {
             decoration: BoxDecoration(
               color: Colors.white.withValues(alpha: 0.05),
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: TwinceColors.cyan.withValues(alpha: 0.35)),
+              border: Border.all(
+                color: TwinceColors.cyan.withValues(alpha: 0.35),
+              ),
             ),
           ),
           Row(
@@ -408,7 +454,10 @@ class _TimeWheels extends StatelessWidget {
                   },
                 ),
               ),
-              const Text(':', style: TextStyle(fontSize: 32, fontWeight: FontWeight.w300)),
+              const Text(
+                ':',
+                style: TextStyle(fontSize: 32, fontWeight: FontWeight.w300),
+              ),
               Expanded(
                 child: _Drum(
                   labels: minuteLabels,
@@ -450,7 +499,11 @@ class _TimeWheels extends StatelessWidget {
 }
 
 class _PeriodChip extends StatelessWidget {
-  const _PeriodChip({required this.label, required this.selected, required this.onTap});
+  const _PeriodChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
 
   final String label;
   final bool selected;
@@ -466,7 +519,9 @@ class _PeriodChip extends StatelessWidget {
         decoration: BoxDecoration(
           color: selected ? TwinceColors.cyan : Colors.transparent,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: selected ? TwinceColors.cyan : TwinceColors.stroke),
+          border: Border.all(
+            color: selected ? TwinceColors.cyan : TwinceColors.stroke,
+          ),
         ),
         child: Text(
           label,
@@ -481,7 +536,11 @@ class _PeriodChip extends StatelessWidget {
 }
 
 class _Drum extends StatefulWidget {
-  const _Drum({required this.labels, required this.initialIndex, required this.onChanged});
+  const _Drum({
+    required this.labels,
+    required this.initialIndex,
+    required this.onChanged,
+  });
 
   final List<String> labels;
   final int initialIndex;
@@ -492,9 +551,8 @@ class _Drum extends StatefulWidget {
 }
 
 class _DrumState extends State<_Drum> {
-  late final FixedExtentScrollController _controller = FixedExtentScrollController(
-    initialItem: widget.initialIndex,
-  );
+  late final FixedExtentScrollController _controller =
+      FixedExtentScrollController(initialItem: widget.initialIndex);
 
   @override
   void dispose() {
@@ -522,9 +580,11 @@ class _DrumState extends State<_Drum> {
             Center(
               child: Text(
                 label,
-                style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w400, fontFeatures: [
-                  FontFeature.tabularFigures(),
-                ]),
+                style: const TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w400,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
               ),
             ),
         ],
@@ -544,9 +604,15 @@ class _SaveButton extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
-        gradient: const LinearGradient(colors: [TwinceColors.blue, TwinceColors.cyan]),
+        gradient: const LinearGradient(
+          colors: [TwinceColors.blue, TwinceColors.cyan],
+        ),
         boxShadow: [
-          BoxShadow(color: TwinceColors.cyan.withValues(alpha: 0.35), blurRadius: 16, offset: const Offset(0, 6)),
+          BoxShadow(
+            color: TwinceColors.cyan.withValues(alpha: 0.35),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
         ],
       ),
       child: Material(
@@ -562,11 +628,18 @@ class _SaveButton extends StatelessWidget {
                   ? const SizedBox(
                       width: 22,
                       height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF041018)),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Color(0xFF041018),
+                      ),
                     )
                   : const Text(
                       'Save alarm',
-                      style: TextStyle(color: Color(0xFF041018), fontWeight: FontWeight.w700, fontSize: 16),
+                      style: TextStyle(
+                        color: Color(0xFF041018),
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
                     ),
             ),
           ),

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:twince_alarm/screens/home_screen.dart';
+import 'package:twince_alarm/screens/app_shell.dart';
 import 'package:twince_alarm/theme/twince_theme.dart';
 
 void main() {
@@ -28,7 +28,7 @@ class TwinceAlarmApp extends StatelessWidget {
       title: 'Twince Alarm',
       debugShowCheckedModeBanner: false,
       theme: TwinceTheme.dark(),
-      home: HomeScreen(connectPlatform: connectPlatform),
+      home: AppShell(connectPlatform: connectPlatform),
     );
   }
 }

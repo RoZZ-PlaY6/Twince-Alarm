@@ -119,7 +119,11 @@ class MainActivity : FlutterActivity() {
                 }
             }
             "previewSound" -> {
-                AlarmSounds.preview(this, call.argument<String>("uri").orEmpty())
+                AlarmSounds.preview(
+                    this,
+                    call.argument<String>("uri").orEmpty(),
+                    call.argument<Boolean>("loop") == true,
+                )
                 result.success(true)
             }
             "stopPreview" -> {
@@ -140,6 +144,11 @@ class MainActivity : FlutterActivity() {
             "rescheduleAll" -> {
                 AlarmScheduler.rescheduleAll(this)
                 result.success(AlarmScheduler.canScheduleExact(this))
+            }
+            "loadPlanLibrary" -> result.success(AlarmStore.loadPlanLibrary(this))
+            "savePlanLibrary" -> {
+                AlarmStore.savePlanLibrary(this, call.argument<String>("json").orEmpty())
+                result.success(true)
             }
             "previewRing" -> {
                 val args = call.arguments as? Map<*, *> ?: emptyMap<String, Any>()

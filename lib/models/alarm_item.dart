@@ -9,6 +9,7 @@ class AlarmItem {
     required this.vibrate,
     required this.soundUri,
     required this.repeatDays,
+    this.weekTags = const [],
     this.snoozeUntil = 0,
     this.scheduleError = '',
   });
@@ -22,6 +23,10 @@ class AlarmItem {
   final bool vibrate;
   final String soundUri;
   final List<int> repeatDays;
+
+  /// Empty means the alarm repeats on its weekdays every week.
+  /// Imported plans use `Z` and/or `F`. Manual alarms leave this empty.
+  final List<String> weekTags;
   final int snoozeUntil;
   final String scheduleError;
 
@@ -35,6 +40,7 @@ class AlarmItem {
     bool? vibrate,
     String? soundUri,
     List<int>? repeatDays,
+    List<String>? weekTags,
     int? snoozeUntil,
     String? scheduleError,
   }) {
@@ -48,6 +54,7 @@ class AlarmItem {
       vibrate: vibrate ?? this.vibrate,
       soundUri: soundUri ?? this.soundUri,
       repeatDays: repeatDays ?? this.repeatDays,
+      weekTags: weekTags ?? this.weekTags,
       snoozeUntil: snoozeUntil ?? this.snoozeUntil,
       scheduleError: scheduleError ?? this.scheduleError,
     );
@@ -56,6 +63,7 @@ class AlarmItem {
   Map<String, Object?> toMap() {
     return {
       'id': id,
+      'alarmId': id,
       'hour': hour,
       'minute': minute,
       'label': label,
@@ -64,6 +72,7 @@ class AlarmItem {
       'vibrate': vibrate,
       'soundUri': soundUri,
       'repeatDays': repeatDays,
+      'weekTags': weekTags,
     };
   }
 
@@ -82,6 +91,7 @@ class AlarmItem {
       vibrate: map['vibrate'] as bool? ?? true,
       soundUri: map['soundUri'] as String? ?? '',
       repeatDays: _asIntList(map['repeatDays']),
+      weekTags: _asWeekTags(map['weekTags']),
       snoozeUntil: _asInt(map['snoozeUntil']),
       scheduleError: map['scheduleError'] as String? ?? '',
     );
@@ -212,13 +222,23 @@ DateTime? nextTrigger(AlarmItem alarm, DateTime from) {
   if (alarm.repeatDays.isEmpty) {
     final today = at(from);
     if (today.isAfter(from)) return today;
-    final tomorrow = DateTime(from.year, from.month, from.day).add(const Duration(days: 1));
+    final tomorrow = DateTime(
+      from.year,
+      from.month,
+      from.day,
+    ).add(const Duration(days: 1));
     return at(tomorrow);
   }
   for (var offset = 0; offset <= 7; offset++) {
-    final day = DateTime(from.year, from.month, from.day).add(Duration(days: offset));
+    final day = DateTime(
+      from.year,
+      from.month,
+      from.day,
+    ).add(Duration(days: offset));
     final when = at(day);
-    if (alarm.repeatDays.contains(when.weekday) && when.isAfter(from)) return when;
+    if (alarm.repeatDays.contains(when.weekday) && when.isAfter(from)) {
+      return when;
+    }
   }
   return null;
 }
@@ -299,5 +319,21 @@ int _asInt(Object? value, {int fallback = 0}) {
 
 List<int> _asIntList(Object? value) {
   if (value is! List) return const [];
-  return value.whereType<num>().map((item) => item.toInt()).where((day) => day >= 1 && day <= 7).toList();
+  return value
+      .whereType<num>()
+      .map((item) => item.toInt())
+      .where((day) => day >= 1 && day <= 7)
+      .toList();
+}
+
+List<String> _asWeekTags(Object? value) {
+  if (value is! List) return const [];
+  final tags = value
+      .map((item) => item.toString().toUpperCase())
+      .where((tag) => tag == 'Z' || tag == 'F')
+      .toSet();
+  final ordered = <String>[];
+  if (tags.contains('Z')) ordered.add('Z');
+  if (tags.contains('F')) ordered.add('F');
+  return ordered;
 }

@@ -16,6 +16,7 @@ data class TwinceAlarm(
     val vibrate: Boolean,
     val soundUri: String,
     val repeatDays: List<Int>,
+    val weekTags: List<String> = emptyList(),
 )
 
 data class SnoozeRecord(
@@ -35,6 +36,7 @@ object AlarmStore {
     private const val KEY_SNOOZES = "snoozes"
     private const val KEY_CALLBACK_PACKAGE = "callback_package"
     private const val KEY_CALLBACK_CLASS = "callback_class"
+    private const val KEY_PLAN_LIBRARY = "plan_library"
 
     private val lock = Any()
 
@@ -63,6 +65,7 @@ object AlarmStore {
             label = alarm.label.ifBlank { "Alarm" },
             subtitle = alarm.subtitle.ifBlank { AlarmContract.DEFAULT_SUBTITLE },
             repeatDays = sanitizeRepeatDays(alarm.repeatDays),
+            weekTags = sanitizeWeekTags(alarm.weekTags),
         )
         val index = current.indexOfFirst { it.id == saved.id }
         if (index >= 0) current[index] = saved else current.add(saved)
@@ -157,6 +160,7 @@ object AlarmStore {
             "vibrate" to alarm.vibrate,
             "soundUri" to alarm.soundUri,
             "repeatDays" to ArrayList(alarm.repeatDays),
+            "weekTags" to ArrayList(alarm.weekTags),
             "snoozeUntil" to snoozeUntil(context, alarm.id),
         )
     }
@@ -172,6 +176,7 @@ object AlarmStore {
             .put("vibrate", alarm.vibrate)
             .put("soundUri", alarm.soundUri)
             .put("repeatDays", JSONArray(alarm.repeatDays))
+            .put("weekTags", JSONArray(alarm.weekTags))
     }
 
     fun fromArgs(args: Map<*, *>): TwinceAlarm {
@@ -180,7 +185,7 @@ object AlarmStore {
         require(hour in 0..23) { "hour must be 0..23" }
         require(minute in 0..59) { "minute must be 0..59" }
         return TwinceAlarm(
-            id = args[AlarmContract.EXTRA_ALARM_ID].asInt(0),
+            id = args[AlarmContract.EXTRA_ALARM_ID].asInt(args["id"].asInt(0)),
             hour = hour,
             minute = minute,
             label = args[AlarmContract.EXTRA_LABEL].asString("Alarm"),
@@ -189,6 +194,7 @@ object AlarmStore {
             vibrate = args[AlarmContract.EXTRA_VIBRATE].asBool(true),
             soundUri = args[AlarmContract.EXTRA_SOUND_URI].asString(""),
             repeatDays = readDaysArg(args[AlarmContract.EXTRA_REPEAT_DAYS]),
+            weekTags = readWeekTags(args["weekTags"]),
         )
     }
 
@@ -223,6 +229,7 @@ object AlarmStore {
             vibrate = obj.optBoolean("vibrate", true),
             soundUri = obj.optString("soundUri", ""),
             repeatDays = sanitizeRepeatDays(repeat),
+            weekTags = readWeekTags(obj.optJSONArray("weekTags")),
         )
     }
 
@@ -255,6 +262,14 @@ object AlarmStore {
         return array.toString()
     }
 
+    fun loadPlanLibrary(context: Context): String = synchronized(lock) {
+        prefs(context).getString(KEY_PLAN_LIBRARY, "") ?: ""
+    }
+
+    fun savePlanLibrary(context: Context, json: String) = synchronized(lock) {
+        prefs(context).edit().putString(KEY_PLAN_LIBRARY, json).commit()
+    }
+
     private fun readDaysArg(raw: Any?): List<Int> {
         val values = when (raw) {
             is List<*> -> raw.mapNotNull { it.asIntOrNull() }
@@ -262,6 +277,25 @@ object AlarmStore {
             else -> emptyList()
         }
         return sanitizeRepeatDays(values)
+    }
+
+    private fun readWeekTags(raw: Any?): List<String> {
+        val values = when (raw) {
+            is List<*> -> raw.mapNotNull { it?.toString() }
+            is JSONArray -> buildList {
+                for (i in 0 until raw.length()) add(raw.optString(i))
+            }
+            else -> emptyList()
+        }
+        return sanitizeWeekTags(values)
+    }
+
+    private fun sanitizeWeekTags(tags: List<String>): List<String> {
+        val normalized = tags.map { it.trim().uppercase() }.filter { it == "Z" || it == "F" }.toSet()
+        return buildList {
+            if ("Z" in normalized) add("Z")
+            if ("F" in normalized) add("F")
+        }
     }
 }
 

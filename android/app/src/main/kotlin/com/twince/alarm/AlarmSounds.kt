@@ -33,7 +33,7 @@ object AlarmSounds {
         return results
     }
 
-    fun preview(context: Context, soundUri: String) {
+    fun preview(context: Context, soundUri: String, loop: Boolean = false) {
         stop()
         val uri = if (soundUri.isBlank()) {
             RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
@@ -50,7 +50,10 @@ object AlarmSounds {
         )
         try {
             media.setDataSource(context.applicationContext, uri)
-            media.setOnPreparedListener { it.start() }
+            media.setOnPreparedListener {
+                it.isLooping = loop
+                it.start()
+            }
             media.prepareAsync()
         } catch (error: Exception) {
             Log.e(AlarmContract.TAG, "Preview failed", error)

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:twince_alarm/models/alarm_item.dart';
 
@@ -12,35 +13,79 @@ import 'package:twince_alarm/models/alarm_item.dart';
 /// `com.twince.alarm.ACTION_CREATE_ALARM` and
 /// `com.twince.alarm.ACTION_CANCEL_ALARM`.
 /// They must declare `com.twince.alarm.permission.CONTROL_ALARMS`.
+///
+/// Flutter Web has no Android engine. [instance] then stores alarms in
+/// [_WebAlarmMemory] for the current page only, so the form can be saved and
+/// the list can show them. That memory does not ring, notify, schedule, or
+/// survive a browser restart.
 class AlarmBridge {
-  AlarmBridge._();
+  AlarmBridge._() : _web = kIsWeb ? _WebAlarmMemory() : null;
 
   static final instance = AlarmBridge._();
 
+  /// In-memory bridge for tests. Production Android keeps using the channel.
+  @visibleForTesting
+  factory AlarmBridge.memory() => AlarmBridge._memory(_WebAlarmMemory());
+
+  AlarmBridge._memory(this._web);
+
   static const _methods = MethodChannel('com.twince.alarm/alarms');
   static const _events = EventChannel('com.twince.alarm/events');
+  static const _webSounds = [AlarmSound(name: 'Default alarm', uri: '')];
+
+  final _WebAlarmMemory? _web;
+  _WebAlarmMemory? _testMemory;
+
+  _WebAlarmMemory? get _memory => _testMemory ?? _web;
+
+  /// Points [instance] at a fresh in-memory session. VM tests use this
+  /// because [kIsWeb] is false there. Android builds leave it unset.
+  @visibleForTesting
+  void useMemorySession() {
+    _testMemory = _WebAlarmMemory();
+  }
+
+  @visibleForTesting
+  void clearMemorySession() {
+    _testMemory = null;
+  }
 
   Stream<AlarmEvent> get events {
+    if (_memory != null) return const Stream<AlarmEvent>.empty();
     return _events.receiveBroadcastStream().map((raw) {
       return AlarmEvent.fromMap(Map<dynamic, dynamic>.from(raw as Map));
     });
   }
 
   Future<List<AlarmItem>> getAlarms() async {
+    final memory = _memory;
+    if (memory != null) return memory.getAlarms();
     final raw = await _methods.invokeMethod<dynamic>('getAlarms');
     return _maps(raw).map(AlarmItem.fromMap).toList();
   }
 
   Future<AlarmItem> upsert(AlarmItem alarm) async {
-    final raw = await _methods.invokeMethod<dynamic>('upsertAlarm', alarm.toMap());
+    final memory = _memory;
+    if (memory != null) return memory.upsert(alarm);
+    final raw = await _methods.invokeMethod<dynamic>(
+      'upsertAlarm',
+      alarm.toMap(),
+    );
     return AlarmItem.fromMap(_map(raw));
   }
 
   Future<void> delete(int id) {
+    final memory = _memory;
+    if (memory != null) {
+      memory.delete(id);
+      return Future<void>.value();
+    }
     return _methods.invokeMethod<dynamic>('deleteAlarm', {'id': id});
   }
 
   Future<AlarmItem> setEnabled(int id, bool enabled) async {
+    final memory = _memory;
+    if (memory != null) return memory.setEnabled(id, enabled);
     final raw = await _methods.invokeMethod<dynamic>('setEnabled', {
       'id': id,
       'enabled': enabled,
@@ -49,43 +94,72 @@ class AlarmBridge {
   }
 
   Future<List<AlarmSound>> listSounds() async {
+    if (_memory != null) return _webSounds;
     final raw = await _methods.invokeMethod<dynamic>('listAlarmSounds');
     return _maps(raw).map(AlarmSound.fromMap).toList();
   }
 
-  Future<void> previewSound(String uri) {
-    return _methods.invokeMethod<dynamic>('previewSound', {'uri': uri});
+  Future<void> previewSound(String uri, {bool loop = false}) {
+    if (_memory != null) return Future<void>.value();
+    return _methods.invokeMethod<dynamic>('previewSound', {
+      'uri': uri,
+      'loop': loop,
+    });
   }
 
   Future<void> stopPreview() {
+    if (_memory != null) return Future<void>.value();
     return _methods.invokeMethod<dynamic>('stopPreview');
   }
 
   Future<AlarmPermissions> permissions() async {
+    if (_memory != null) return AlarmPermissions.granted;
     final raw = await _methods.invokeMethod<dynamic>('permissions');
     return AlarmPermissions.fromMap(_map(raw));
   }
 
   Future<bool> requestNotifications() async {
-    final granted = await _methods.invokeMethod<dynamic>('requestNotifications');
+    if (_memory != null) return true;
+    final granted = await _methods.invokeMethod<dynamic>(
+      'requestNotifications',
+    );
     return granted == true;
   }
 
   Future<void> openExactAlarmSettings() {
+    if (_memory != null) return Future<void>.value();
     return _methods.invokeMethod<dynamic>('openExactAlarmSettings');
   }
 
   Future<void> openFullScreenIntentSettings() {
+    if (_memory != null) return Future<void>.value();
     return _methods.invokeMethod<dynamic>('openFullScreenIntentSettings');
   }
 
   Future<List<AlarmEvent>> consumeEvents() async {
+    if (_memory != null) return const [];
     final raw = await _methods.invokeMethod<dynamic>('consumeEvents');
     return _maps(raw).map(AlarmEvent.fromMap).toList();
   }
 
   Future<void> rescheduleAll() {
+    if (_memory != null) return Future<void>.value();
     return _methods.invokeMethod<dynamic>('rescheduleAll');
+  }
+
+  Future<String> loadPlanLibrary() async {
+    if (_memory != null) return _memory!.planLibrary;
+    final raw = await _methods.invokeMethod<dynamic>('loadPlanLibrary');
+    return raw as String? ?? '';
+  }
+
+  Future<void> savePlanLibrary(String json) {
+    final memory = _memory;
+    if (memory != null) {
+      memory.planLibrary = json;
+      return Future<void>.value();
+    }
+    return _methods.invokeMethod<dynamic>('savePlanLibrary', {'json': json});
   }
 
   Future<void> previewRing({
@@ -97,6 +171,7 @@ class AlarmBridge {
     bool vibrate = true,
     String soundUri = '',
   }) {
+    if (_memory != null) return Future<void>.value();
     return _methods.invokeMethod<dynamic>('previewRing', {
       'alarmId': id,
       'hour': hour,
@@ -109,9 +184,58 @@ class AlarmBridge {
   }
 
   Future<ClockLaunch?> consumeClockIntent() async {
+    if (_memory != null) return null;
     final raw = await _methods.invokeMethod<dynamic>('consumeClockIntent');
     if (raw == null) return null;
     return ClockLaunch.fromMap(_map(raw));
+  }
+}
+
+/// Page-session alarm list used on Flutter Web. Not written to disk or
+/// browser storage, and not connected to the Android alarm engine.
+class _WebAlarmMemory {
+  final List<AlarmItem> _alarms = [];
+  int _nextId = 1;
+  String planLibrary = '';
+
+  List<AlarmItem> getAlarms() => _alarms.map(_copy).toList();
+
+  AlarmItem upsert(AlarmItem alarm) {
+    final id = alarm.id > 0 ? alarm.id : _nextId++;
+    if (id >= _nextId) _nextId = id + 1;
+    final saved = _copy(alarm.copyWith(id: id));
+    final index = _alarms.indexWhere((item) => item.id == id);
+    if (index >= 0) {
+      _alarms[index] = saved;
+    } else {
+      _alarms.add(saved);
+    }
+    return _copy(saved);
+  }
+
+  void delete(int id) {
+    _alarms.removeWhere((item) => item.id == id);
+  }
+
+  AlarmItem setEnabled(int id, bool enabled) {
+    final index = _alarms.indexWhere((item) => item.id == id);
+    if (index < 0) {
+      throw PlatformException(
+        code: 'not_found',
+        message: 'Alarm $id was not found',
+      );
+    }
+    final saved = _copy(_alarms[index].copyWith(enabled: enabled));
+    _alarms[index] = saved;
+    return _copy(saved);
+  }
+
+  AlarmItem _copy(AlarmItem alarm) {
+    return alarm.copyWith(
+      repeatDays: List<int>.from(alarm.repeatDays),
+      weekTags: List<String>.from(alarm.weekTags),
+      scheduleError: '',
+    );
   }
 }
 
@@ -122,5 +246,8 @@ Map<dynamic, dynamic> _map(Object? raw) {
 
 List<Map<dynamic, dynamic>> _maps(Object? raw) {
   if (raw is! List) return const [];
-  return raw.whereType<Map>().map((item) => Map<dynamic, dynamic>.from(item)).toList();
+  return raw
+      .whereType<Map>()
+      .map((item) => Map<dynamic, dynamic>.from(item))
+      .toList();
 }

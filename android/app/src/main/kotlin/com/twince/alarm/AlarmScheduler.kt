@@ -104,13 +104,42 @@ object AlarmScheduler {
             return cal.timeInMillis
         }
         val wanted = alarm.repeatDays.toSet()
-        for (offset in 0..7) {
+        val limit = if (needsWeekFilter(alarm.weekTags)) 21 else 7
+        for (offset in 0..limit) {
             val cal = atTime(fromMillis, alarm.hour, alarm.minute)
             cal.add(Calendar.DAY_OF_YEAR, offset)
             val iso = calendarDayToIso(cal.get(Calendar.DAY_OF_WEEK))
-            if (iso in wanted && cal.timeInMillis > fromMillis) return cal.timeInMillis
+            if (iso in wanted && weekAllowed(cal, alarm.weekTags) && cal.timeInMillis > fromMillis) {
+                return cal.timeInMillis
+            }
         }
         return null
+    }
+
+    private fun needsWeekFilter(tags: List<String>): Boolean {
+        val wanted = tags.map { it.uppercase() }.filter { it == "Z" || it == "F" }.toSet()
+        return wanted.size == 1
+    }
+
+    // Odd ISO-8601 weeks are Z. Even ISO-8601 weeks are F.
+    // Manual alarms have no week tags and keep the previous schedule.
+    private fun weekAllowed(cal: Calendar, tags: List<String>): Boolean {
+        if (!needsWeekFilter(tags)) return true
+        val odd = isoWeekNumber(cal) % 2 == 1
+        val label = if (odd) "Z" else "F"
+        return tags.any { it.equals(label, ignoreCase = true) }
+    }
+
+    private fun isoWeekNumber(source: Calendar): Int {
+        val copy = source.clone() as Calendar
+        copy.set(Calendar.HOUR_OF_DAY, 12)
+        copy.set(Calendar.MINUTE, 0)
+        copy.set(Calendar.SECOND, 0)
+        copy.set(Calendar.MILLISECOND, 0)
+        val weekday = calendarDayToIso(copy.get(Calendar.DAY_OF_WEEK))
+        copy.add(Calendar.DAY_OF_YEAR, 4 - weekday)
+        val dayOfYear = copy.get(Calendar.DAY_OF_YEAR)
+        return ((dayOfYear - 1) / 7) + 1
     }
 
     private fun atTime(fromMillis: Long, hour: Int, minute: Int): Calendar {
