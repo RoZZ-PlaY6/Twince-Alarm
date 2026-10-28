@@ -329,11 +329,12 @@ List<int> _asIntList(Object? value) {
 List<String> _asWeekTags(Object? value) {
   if (value is! List) return const [];
   final tags = value
-      .map((item) => item.toString().toUpperCase())
-      .where((tag) => tag == 'Z' || tag == 'F')
+      .map((item) => item.toString().trim().toLowerCase())
       .toSet();
+  if (tags.contains('both') || tags.contains('every')) return const ['both'];
   final ordered = <String>[];
-  if (tags.contains('Z')) ordered.add('Z');
-  if (tags.contains('F')) ordered.add('F');
+  if (tags.contains('z') || tags.contains('even')) ordered.add('Z');
+  if (tags.contains('f') || tags.contains('odd')) ordered.add('F');
+  if (ordered.length == 2) return const ['both'];
   return ordered;
 }

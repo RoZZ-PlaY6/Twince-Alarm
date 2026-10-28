@@ -15,7 +15,8 @@ const _weekdays = {
 /// Parses a Twince `Export JSON` document.
 ///
 /// `endTime` is the only alarm time. `startTime` and `startSecond` are ignored.
-/// Source `weeks`/`weekType` `odd` is Z and `even` is F.
+/// Current mapping is even=Z and odd=F. Legacy exports declaring even=F and
+/// odd=Z are accepted and converted to the current semantic mapping.
 ImportedPlan parseTwincePlan(String raw) {
   final Object? decoded;
   try {
@@ -60,14 +61,15 @@ ImportedPlan parseTwincePlan(String raw) {
   if (tasksRaw is! List) {
     throw PlanImportException('Unsupported Twince Plan format.');
   }
+  var legacyLabels = false;
   final reference = plan['weekReference'];
   if (reference is Map) {
     final evenLabel = reference['evenLabel'];
     final oddLabel = reference['oddLabel'];
-    if (evenLabel != null && evenLabel != 'F') {
-      throw PlanImportException('Invalid Z/F week assignment.');
-    }
-    if (oddLabel != null && oddLabel != 'Z') {
+    if (evenLabel == 'F' && oddLabel == 'Z') {
+      legacyLabels = true;
+    } else if ((evenLabel != null || oddLabel != null) &&
+        (evenLabel != 'Z' || oddLabel != 'F')) {
       throw PlanImportException('Invalid Z/F week assignment.');
     }
   }
@@ -76,7 +78,7 @@ ImportedPlan parseTwincePlan(String raw) {
     if (item is! Map) {
       throw PlanImportException('Task has no title.');
     }
-    final task = _readTask(Map<String, Object?>.from(item), mode);
+    final task = _readTask(Map<String, Object?>.from(item), mode, legacyLabels);
     grouped.putIfAbsent(task.id, () => []).add(task);
   }
   final tasks = grouped.entries
@@ -116,7 +118,11 @@ class _RawTask {
   final PlanWeek? week;
 }
 
-_RawTask _readTask(Map<String, Object?> json, PlanWeekMode mode) {
+_RawTask _readTask(
+  Map<String, Object?> json,
+  PlanWeekMode mode,
+  bool legacyLabels,
+) {
   final id = json['id'];
   if (id is! String || id.trim().isEmpty) {
     throw PlanImportException('Missing task ID.');
@@ -133,7 +139,7 @@ _RawTask _readTask(Map<String, Object?> json, PlanWeekMode mode) {
   }
   PlanWeek? week;
   if (mode == PlanWeekMode.evenOdd) {
-    week = _week(json['weekType'], json['weekLabel']);
+    week = _week(json['weekType'], json['weekLabel'], legacyLabels);
   }
   final description = json['description'];
   return _RawTask(
@@ -174,9 +180,11 @@ List<int> _days(Object? raw) {
   return days.toSet().toList()..sort();
 }
 
-PlanWeek _week(Object? type, Object? label) {
-  if (type == 'odd' && label == 'Z') return PlanWeek.z;
-  if (type == 'even' && label == 'F') return PlanWeek.f;
+PlanWeek _week(Object? type, Object? label, bool legacyLabels) {
+  if (!legacyLabels && type == 'odd' && label == 'F') return PlanWeek.f;
+  if (!legacyLabels && type == 'even' && label == 'Z') return PlanWeek.z;
+  if (legacyLabels && type == 'odd' && label == 'Z') return PlanWeek.f;
+  if (legacyLabels && type == 'even' && label == 'F') return PlanWeek.z;
   throw PlanImportException('Invalid Z/F week assignment.');
 }
 

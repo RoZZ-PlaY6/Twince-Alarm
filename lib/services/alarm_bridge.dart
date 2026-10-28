@@ -162,6 +162,60 @@ class AlarmBridge {
     return _methods.invokeMethod<dynamic>('savePlanLibrary', {'json': json});
   }
 
+  /// URI of the sound last chosen in the alarm editor. Empty is the default tone.
+  Future<String> loadLastAlarmSound() async {
+    final memory = _memory;
+    if (memory != null) return memory.lastAlarmSound;
+    try {
+      final raw = await _methods.invokeMethod<dynamic>('loadLastAlarmSound');
+      return raw as String? ?? '';
+    } on PlatformException {
+      return '';
+    }
+  }
+
+  Future<void> saveLastAlarmSound(String uri) async {
+    final memory = _memory;
+    if (memory != null) {
+      memory.lastAlarmSound = uri;
+      return;
+    }
+    try {
+      await _methods.invokeMethod<dynamic>('saveLastAlarmSound', {'uri': uri});
+    } on PlatformException {
+      // A missing preference store must not block choosing a sound.
+    }
+  }
+
+  Future<List<String>> loadFavoriteAlarmSounds() async {
+    final memory = _memory;
+    if (memory != null) return List<String>.of(memory.favoriteAlarmSounds);
+    try {
+      final raw = await _methods.invokeMethod<dynamic>(
+        'loadFavoriteAlarmSounds',
+      );
+      if (raw is! List) return const [];
+      return raw.map((item) => item.toString()).toList();
+    } on PlatformException {
+      return const [];
+    }
+  }
+
+  Future<void> saveFavoriteAlarmSounds(List<String> uris) async {
+    final memory = _memory;
+    if (memory != null) {
+      memory.favoriteAlarmSounds = List<String>.of(uris);
+      return;
+    }
+    try {
+      await _methods.invokeMethod<dynamic>('saveFavoriteAlarmSounds', {
+        'uris': uris,
+      });
+    } on PlatformException {
+      // Favorites are a preference. The picker still updates on screen.
+    }
+  }
+
   Future<void> previewRing({
     int id = 0,
     int hour = 7,
@@ -197,6 +251,8 @@ class _WebAlarmMemory {
   final List<AlarmItem> _alarms = [];
   int _nextId = 1;
   String planLibrary = '';
+  String lastAlarmSound = '';
+  List<String> favoriteAlarmSounds = const [];
 
   List<AlarmItem> getAlarms() => _alarms.map(_copy).toList();
 

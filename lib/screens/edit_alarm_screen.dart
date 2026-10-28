@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:twince_alarm/models/alarm_item.dart';
 import 'package:twince_alarm/screens/ringing_screen.dart';
 import 'package:twince_alarm/services/alarm_bridge.dart';
+import 'package:twince_alarm/services/last_alarm_sound.dart';
 import 'package:twince_alarm/theme/twince_theme.dart';
 import 'package:twince_alarm/widgets/sound_picker.dart';
 
@@ -17,6 +18,7 @@ class EditAlarmScreen extends StatefulWidget {
 
 class _EditAlarmScreenState extends State<EditAlarmScreen> {
   final _bridge = AlarmBridge.instance;
+  final _lastSound = createLastAlarmSoundStore();
   late int _hour;
   late int _minute;
   late bool _vibrate;
@@ -67,15 +69,37 @@ class _EditAlarmScreenState extends State<EditAlarmScreen> {
     try {
       final sounds = await _bridge.listSounds();
       if (!mounted || sounds.isEmpty) return;
+      final savedUri = widget.alarm?.soundUri;
+      final uri = savedUri ?? await _rememberedUri(sounds);
+      final match = sounds.where((sound) => sound.uri == uri);
+      if (!mounted) return;
       setState(() {
         _sounds = sounds;
-        final match = sounds.where((sound) => sound.uri == _soundUri);
+        _soundUri = uri;
         _soundName = match.isEmpty
-            ? (_soundUri.isEmpty ? 'Default alarm' : 'Custom tone')
+            ? (uri.isEmpty ? 'Default alarm' : 'Custom tone')
             : match.first.name;
       });
     } on PlatformException {
       // The default tone stays selected.
+    }
+  }
+
+  Future<String> _rememberedUri(List<AlarmSound> sounds) async {
+    try {
+      final remembered = await _lastSound.read();
+      if (sounds.any((sound) => sound.uri == remembered)) return remembered;
+    } catch (_) {
+      // A missing or unreadable preference falls back to the default tone.
+    }
+    return '';
+  }
+
+  Future<void> _remember(AlarmSound sound) async {
+    try {
+      await _lastSound.write(sound.uri);
+    } catch (_) {
+      // The form still keeps the tone the user just chose.
     }
   }
 
@@ -89,6 +113,7 @@ class _EditAlarmScreenState extends State<EditAlarmScreen> {
           _soundUri = sound.uri;
           _soundName = sound.name;
         });
+        _remember(sound);
       },
     );
   }

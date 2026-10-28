@@ -13,6 +13,7 @@ import android.provider.Settings
 import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugins.GeneratedPluginRegistrant
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -40,6 +41,9 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        // Register platform plugins (e.g. package_info_plus) so that
+        // PackageInfo.fromPlatform() can resolve the app version.
+        GeneratedPluginRegistrant.registerWith(flutterEngine)
         val messenger = flutterEngine.dartExecutor.binaryMessenger
         MethodChannel(messenger, METHOD_CHANNEL).setMethodCallHandler { call, result ->
             try {
@@ -148,6 +152,17 @@ class MainActivity : FlutterActivity() {
             "loadPlanLibrary" -> result.success(AlarmStore.loadPlanLibrary(this))
             "savePlanLibrary" -> {
                 AlarmStore.savePlanLibrary(this, call.argument<String>("json").orEmpty())
+                result.success(true)
+            }
+            "loadLastAlarmSound" -> result.success(AlarmStore.loadLastAlarmSound(this))
+            "saveLastAlarmSound" -> {
+                AlarmStore.saveLastAlarmSound(this, call.argument<String>("uri").orEmpty())
+                result.success(true)
+            }
+            "loadFavoriteAlarmSounds" -> result.success(AlarmStore.loadFavoriteAlarmSounds(this))
+            "saveFavoriteAlarmSounds" -> {
+                val uris = call.argument<List<*>>("uris").orEmpty().map { it?.toString().orEmpty() }
+                AlarmStore.saveFavoriteAlarmSounds(this, uris)
                 result.success(true)
             }
             "previewRing" -> {

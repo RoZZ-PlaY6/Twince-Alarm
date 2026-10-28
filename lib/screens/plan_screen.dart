@@ -1,33 +1,154 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:twince_alarm/models/alarm_item.dart';
 import 'package:twince_alarm/models/imported_plan.dart';
 import 'package:twince_alarm/services/plan_repository.dart';
+import 'package:twince_alarm/services/plan_week.dart';
 import 'package:twince_alarm/theme/twince_theme.dart';
 
 class PlanScreen extends StatefulWidget {
-  const PlanScreen({super.key, this.repository});
+  const PlanScreen({super.key, this.repository, this.active = true});
 
   final PlanRepository? repository;
+  final bool active;
 
   @override
   State<PlanScreen> createState() => _PlanScreenState();
 }
 
-class _PlanScreenState extends State<PlanScreen> {
+class _PlanScreenState extends State<PlanScreen> with WidgetsBindingObserver {
   late final PlanRepository _repository = widget.repository ?? PlanRepository();
   bool _loading = true;
+  bool _asking = false;
+  Timer? _weekWatch;
+  DateTime? _visibleSaturday;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _weekWatch = Timer.periodic(
+      const Duration(minutes: 1),
+      (_) => _onWeekTick(),
+    );
     _reload();
   }
 
-  Future<void> _reload() async {
+  @override
+  void dispose() {
+    _weekWatch?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(PlanScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.active && !oldWidget.active) {
+      _promptIfNeeded();
+    }
+  }
+
+  void _promptIfNeeded() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          !widget.active ||
+          _loading ||
+          _repository.weekConfigured) {
+        return;
+      }
+      _chooseWeek(requiredChoice: true);
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _reload(reconcile: true);
+    }
+  }
+
+  Future<void> _reload({bool reconcile = false}) async {
     await _repository.load();
     if (!mounted) return;
     setState(() => _loading = false);
+    _visibleSaturday = saturdayOnOrBefore(DateTime.now());
+    if (!_repository.weekConfigured) {
+      if (widget.active) _promptIfNeeded();
+      return;
+    }
+    if (reconcile) await _repository.reconcile(DateTime.now());
+  }
+
+  Future<void> _onWeekTick() async {
+    final saturday = saturdayOnOrBefore(DateTime.now());
+    if (_visibleSaturday == saturday) return;
+    _visibleSaturday = saturday;
+    if (!_repository.weekConfigured) return;
+    await _repository.reconcile(DateTime.now());
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _chooseWeek({required bool requiredChoice}) async {
+    if (_asking || !mounted) return;
+    _asking = true;
+    bool? even;
+    try {
+      even = await showDialog<bool>(
+        context: context,
+        useRootNavigator: true,
+        barrierDismissible: !requiredChoice,
+        builder: (dialogContext) {
+          return PopScope(
+            canPop: !requiredChoice,
+            child: AlertDialog(
+              title: const Text('Current week'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Choose the parity of this Saturday–Friday week. It flips automatically next Saturday.',
+                  ),
+                  const SizedBox(height: 16),
+                  FilledButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(true),
+                    child: const Text(
+                      '\u0647\u0641\u062a\u0647 \u0632\u0648\u062c (Z)\nEven week (Z)',
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  FilledButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(false),
+                    child: const Text(
+                      '\u0647\u0641\u062a\u0647 \u0641\u0631\u062f (F)\nOdd week (F)',
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    } finally {
+      _asking = false;
+    }
+    if (!mounted) return;
+    if (even == null) {
+      if (requiredChoice && !_repository.weekConfigured) {
+        _promptIfNeeded();
+      }
+      return;
+    }
+    try {
+      await _repository.setCurrentWeek(even: even, now: DateTime.now());
+    } finally {
+      if (mounted) setState(() {});
+    }
   }
 
   Future<void> _import() async {
@@ -63,17 +184,52 @@ class _PlanScreenState extends State<PlanScreen> {
                     ),
                     IconButton(
                       tooltip: 'Import Plan',
-                      onPressed: _import,
+                      onPressed: _repository.weekConfigured ? _import : null,
                       icon: const Icon(Icons.add, color: TwinceColors.cyan),
                     ),
                   ],
                 ),
               ),
+              if (_repository.weekConfigured)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 8, 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          currentWeekCaption(
+                            _repository.weekCycle!,
+                            DateTime.now(),
+                          ),
+                          style: const TextStyle(
+                            color: TwinceColors.cyan,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Edit current week',
+                        onPressed: () => _chooseWeek(requiredChoice: false),
+                        icon: const Icon(
+                          Icons.edit_outlined,
+                          color: TwinceColors.cyan,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               Expanded(
                 child: _loading
                     ? const Center(
                         child: CircularProgressIndicator(
                           color: TwinceColors.cyan,
+                        ),
+                      )
+                    : !_repository.weekConfigured
+                    ? const Center(
+                        child: Text(
+                          'Choose the current week to continue.',
+                          style: TextStyle(color: TwinceColors.muted),
                         ),
                       )
                     : _repository.plans.isEmpty
@@ -90,6 +246,9 @@ class _PlanScreenState extends State<PlanScreen> {
                                     builder: (_) => _PlanDetailPage(
                                       plan: plan,
                                       repository: _repository,
+                                      evenWeek: _repository.isEvenWeekOn(
+                                        DateTime.now(),
+                                      ),
                                     ),
                                   ),
                                 );
@@ -179,10 +338,15 @@ class _PlanCard extends StatelessWidget {
 }
 
 class _PlanDetailPage extends StatelessWidget {
-  const _PlanDetailPage({required this.plan, required this.repository});
+  const _PlanDetailPage({
+    required this.plan,
+    required this.repository,
+    required this.evenWeek,
+  });
 
   final ImportedPlan plan;
   final PlanRepository repository;
+  final bool evenWeek;
 
   Future<void> _delete(BuildContext context) async {
     final confirmed = await showDialog<bool>(
@@ -257,7 +421,8 @@ class _PlanDetailPage extends StatelessWidget {
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                   children: [
-                    for (final task in plan.tasks) _TaskRow(task: task),
+                    for (final task in plan.tasks)
+                      _TaskRow(task: task, evenWeek: evenWeek),
                   ],
                 ),
               ),
@@ -270,13 +435,17 @@ class _PlanDetailPage extends StatelessWidget {
 }
 
 class _TaskRow extends StatelessWidget {
-  const _TaskRow({required this.task});
+  const _TaskRow({required this.task, required this.evenWeek});
 
   final ImportedTask task;
+  final bool evenWeek;
 
   @override
   Widget build(BuildContext context) {
     final days = repeatLabel(task.repeatDays);
+    final recurrence = recurrenceOf(task.weekTags);
+    final eligible =
+        recurrence != null && recurrenceEligible(recurrence, evenWeek);
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
@@ -303,7 +472,7 @@ class _TaskRow extends StatelessWidget {
           ],
           const SizedBox(height: 6),
           Text(
-            '$days · ${task.weekText} · ${task.enabled ? 'On' : 'Off'}',
+            '$days · ${task.weekText} · ${task.enabled ? 'On' : 'Off'} · ${eligible ? 'This week' : 'Not this week'}',
             style: const TextStyle(color: TwinceColors.muted, fontSize: 13),
           ),
         ],

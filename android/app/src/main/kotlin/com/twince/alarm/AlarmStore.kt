@@ -37,6 +37,8 @@ object AlarmStore {
     private const val KEY_CALLBACK_PACKAGE = "callback_package"
     private const val KEY_CALLBACK_CLASS = "callback_class"
     private const val KEY_PLAN_LIBRARY = "plan_library"
+    private const val KEY_LAST_ALARM_SOUND = "last_alarm_sound"
+    private const val KEY_FAVORITE_ALARM_SOUNDS = "favorite_alarm_sounds"
 
     private val lock = Any()
 
@@ -270,6 +272,32 @@ object AlarmStore {
         prefs(context).edit().putString(KEY_PLAN_LIBRARY, json).commit()
     }
 
+    fun loadLastAlarmSound(context: Context): String = synchronized(lock) {
+        prefs(context).getString(KEY_LAST_ALARM_SOUND, "") ?: ""
+    }
+
+    fun saveLastAlarmSound(context: Context, uri: String) = synchronized(lock) {
+        prefs(context).edit().putString(KEY_LAST_ALARM_SOUND, uri).commit()
+    }
+
+    fun loadFavoriteAlarmSounds(context: Context): List<String> = synchronized(lock) {
+        val raw = prefs(context).getString(KEY_FAVORITE_ALARM_SOUNDS, "[]") ?: "[]"
+        return try {
+            val array = JSONArray(raw)
+            buildList {
+                for (index in 0 until array.length()) add(array.optString(index))
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    fun saveFavoriteAlarmSounds(context: Context, uris: List<String>) = synchronized(lock) {
+        val array = JSONArray()
+        uris.forEach { array.put(it) }
+        prefs(context).edit().putString(KEY_FAVORITE_ALARM_SOUNDS, array.toString()).commit()
+    }
+
     private fun readDaysArg(raw: Any?): List<Int> {
         val values = when (raw) {
             is List<*> -> raw.mapNotNull { it.asIntOrNull() }
@@ -291,10 +319,16 @@ object AlarmStore {
     }
 
     private fun sanitizeWeekTags(tags: List<String>): List<String> {
-        val normalized = tags.map { it.trim().uppercase() }.filter { it == "Z" || it == "F" }.toSet()
+        val normalized = tags.map { it.trim().lowercase() }.toSet()
+        if (normalized.contains("both") || normalized.contains("every")) return listOf("both")
+        val letters = buildSet {
+            if ("z" in normalized || "even" in normalized) add("Z")
+            if ("f" in normalized || "odd" in normalized) add("F")
+        }
+        if (letters.contains("Z") && letters.contains("F")) return listOf("both")
         return buildList {
-            if ("Z" in normalized) add("Z")
-            if ("F" in normalized) add("F")
+            if ("Z" in letters) add("Z")
+            if ("F" in letters) add("F")
         }
     }
 }

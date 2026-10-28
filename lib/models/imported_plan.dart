@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:twince_alarm/services/plan_week.dart';
+
 class PlanImportException implements Exception {
   PlanImportException(this.message);
 
@@ -37,14 +39,16 @@ class ImportedTask {
   final int alarmId;
 
   List<String> get weekTags {
-    if (weekAssignments.length != 1) return const [];
+    if (weekAssignments.isEmpty || weekAssignments.length >= 2) {
+      return const ['both'];
+    }
     return [weekAssignments.single == PlanWeek.z ? 'Z' : 'F'];
   }
 
   String get weekText {
     if (weekAssignments.isEmpty) return 'Every week';
-    if (weekAssignments.length == 2) return 'Z + F';
-    return weekAssignments.single == PlanWeek.z ? 'Z' : 'F';
+    if (weekAssignments.length == 2) return 'Even (Z) + Odd (F)';
+    return weekAssignments.single == PlanWeek.z ? 'Even (Z)' : 'Odd (F)';
   }
 
   String get timeText =>
@@ -61,6 +65,20 @@ class ImportedTask {
       enabled: enabled,
       weekAssignments: weekAssignments,
       alarmId: alarmId ?? this.alarmId,
+    );
+  }
+
+  ImportedTask withWeekAssignments(List<PlanWeek> assignments) {
+    return ImportedTask(
+      sourceTaskId: sourceTaskId,
+      title: title,
+      description: description,
+      hour: hour,
+      minute: minute,
+      repeatDays: repeatDays,
+      enabled: enabled,
+      weekAssignments: assignments,
+      alarmId: alarmId,
     );
   }
 
@@ -187,18 +205,62 @@ class ImportPreview {
       updated + removed > 0 || created == 0 && updated > 0;
 }
 
-String encodePlanLibrary(List<ImportedPlan> plans) {
-  return jsonEncode({'plans': plans.map((plan) => plan.toJson()).toList()});
+String encodePlanLibrary(List<ImportedPlan> plans, {WeekCycle? weekCycle}) {
+  return jsonEncode({
+    'weekParityMapping': 2,
+    'plans': plans.map((plan) => plan.toJson()).toList(),
+    if (weekCycle != null) 'weekCycle': weekCycle.toJson(),
+  });
+}
+
+class DecodedPlanLibrary {
+  const DecodedPlanLibrary({required this.plans, this.weekCycle, this.legacyMapping = false});
+
+  final List<ImportedPlan> plans;
+  final WeekCycle? weekCycle;
+
+  /// True when the stored plan library used a legacy Z/F assignment
+  /// (even stored as `F`, odd stored as `Z`). Plan tags were swapped during
+  /// decoding to the current rule: `Z` = Even week (هفته زوج), `F` = Odd week (هفته فرد).
+  final bool legacyMapping;
+}
+
+DecodedPlanLibrary decodePlanLibraryDocument(String raw) {
+  if (raw.trim().isEmpty) {
+    return const DecodedPlanLibrary(plans: []);
+  }
+  final decoded = jsonDecode(raw);
+  if (decoded is! Map) return const DecodedPlanLibrary(plans: []);
+  final legacyMapping = decoded['weekParityMapping'] != 2;
+  final plans = decoded['plans'];
+  final decodedPlans = plans is! List
+      ? const <ImportedPlan>[]
+      : plans
+            .whereType<Map>()
+            .map(
+              (plan) => ImportedPlan.fromJson(Map<String, Object?>.from(plan)),
+            )
+            .map((plan) => legacyMapping ? _migrateLegacyPlan(plan) : plan)
+            .toList();
+  return DecodedPlanLibrary(
+    plans: decodedPlans,
+    weekCycle: WeekCycle.fromJson(decoded['weekCycle']),
+    legacyMapping: legacyMapping,
+  );
+}
+
+ImportedPlan _migrateLegacyPlan(ImportedPlan plan) {
+  return plan.copyWith(
+    tasks: [
+      for (final task in plan.tasks)
+        task.withWeekAssignments([
+          for (final week in task.weekAssignments)
+            week == PlanWeek.z ? PlanWeek.f : PlanWeek.z,
+        ]),
+    ],
+  );
 }
 
 List<ImportedPlan> decodePlanLibrary(String raw) {
-  if (raw.trim().isEmpty) return const [];
-  final decoded = jsonDecode(raw);
-  if (decoded is! Map) return const [];
-  final plans = decoded['plans'];
-  if (plans is! List) return const [];
-  return plans
-      .whereType<Map>()
-      .map((plan) => ImportedPlan.fromJson(Map<String, Object?>.from(plan)))
-      .toList();
+  return decodePlanLibraryDocument(raw).plans;
 }
