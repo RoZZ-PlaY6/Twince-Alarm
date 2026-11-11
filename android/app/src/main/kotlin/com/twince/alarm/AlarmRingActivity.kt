@@ -17,6 +17,9 @@ import java.util.Locale
  */
 class AlarmRingActivity : android.app.Activity() {
     private lateinit var request: RingRequest
+    private val stateListener: (Long?) -> Unit = { token ->
+        if (::request.isInitialized && token != request.token) finish()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -24,6 +27,7 @@ class AlarmRingActivity : android.app.Activity() {
         consumeBack()
         setContentView(R.layout.activity_alarm_ring)
         bind(intent)
+        RingState.addListener(stateListener)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -31,6 +35,11 @@ class AlarmRingActivity : android.app.Activity() {
         setIntent(intent)
         applyLockScreenFlags()
         bind(intent)
+    }
+
+    override fun onDestroy() {
+        RingState.removeListener(stateListener)
+        super.onDestroy()
     }
 
     @Deprecated("Back closes nothing while the alarm is ringing.")
@@ -60,9 +69,7 @@ class AlarmRingActivity : android.app.Activity() {
         findViewById<android.view.View>(R.id.snooze10).setOnClickListener {
             act(AlarmRingService.ACTION_SNOOZE, 10)
         }
-        if (request.token != 0L) {
-            AlarmRingService.start(this, request)
-        }
+        if (!RingState.isActive(request.token)) finish()
     }
 
     private fun act(action: String, minutes: Int) {

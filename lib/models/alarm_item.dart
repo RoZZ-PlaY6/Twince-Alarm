@@ -144,8 +144,14 @@ class AlarmEvent {
     required this.alarmId,
     required this.snoozeMinutes,
     required this.label,
+    this.token = 0,
+    this.automatic = false,
+    this.preview = false,
   });
 
+  final int token;
+  final bool automatic;
+  final bool preview;
   final String type;
   final int alarmId;
   final int snoozeMinutes;
@@ -171,6 +177,9 @@ class AlarmEvent {
       alarmId: _asInt(map['alarmId']),
       snoozeMinutes: _asInt(map['snoozeMinutes']),
       label: map['label'] as String? ?? '',
+      token: _asInt(map['token']),
+      automatic: map['automatic'] as bool? ?? false,
+      preview: map['preview'] as bool? ?? false,
     );
   }
 }

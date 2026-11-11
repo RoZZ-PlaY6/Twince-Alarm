@@ -50,12 +50,12 @@ class AlarmBridge {
     _testMemory = null;
   }
 
-  Stream<AlarmEvent> get events {
-    if (_memory != null) return const Stream<AlarmEvent>.empty();
-    return _events.receiveBroadcastStream().map((raw) {
-      return AlarmEvent.fromMap(Map<dynamic, dynamic>.from(raw as Map));
-    });
-  }
+  late final Stream<AlarmEvent> _platformEvents = _events.receiveBroadcastStream().map((raw) {
+    return AlarmEvent.fromMap(Map<dynamic, dynamic>.from(raw as Map));
+  });
+
+  Stream<AlarmEvent> get events =>
+      _memory != null ? const Stream<AlarmEvent>.empty() : _platformEvents;
 
   Future<List<AlarmItem>> getAlarms() async {
     final memory = _memory;
@@ -216,7 +216,7 @@ class AlarmBridge {
     }
   }
 
-  Future<void> previewRing({
+  Future<int?> previewRing({
     int id = 0,
     int hour = 7,
     int minute = 30,
@@ -225,8 +225,8 @@ class AlarmBridge {
     bool vibrate = true,
     String soundUri = '',
   }) {
-    if (_memory != null) return Future<void>.value();
-    return _methods.invokeMethod<dynamic>('previewRing', {
+    if (_memory != null) return Future<int?>.value();
+    return _methods.invokeMethod<int>('previewRing', {
       'alarmId': id,
       'hour': hour,
       'minute': minute,

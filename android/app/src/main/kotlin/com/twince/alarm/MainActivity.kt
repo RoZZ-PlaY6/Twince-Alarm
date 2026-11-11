@@ -179,7 +179,7 @@ class MainActivity : FlutterActivity() {
                     token = System.currentTimeMillis(),
                 )
                 AlarmRingService.start(this, request)
-                result.success(true)
+                result.success(request.token)
             }
             "consumeClockIntent" -> result.success(consumeClockIntent())
             else -> result.notImplemented()

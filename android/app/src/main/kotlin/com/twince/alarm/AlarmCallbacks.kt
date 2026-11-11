@@ -59,6 +59,9 @@ object AlarmEvents {
         alarmId: Int,
         snoozeMinutes: Int,
         label: String,
+        token: Long = 0L,
+        automatic: Boolean = false,
+        preview: Boolean = false,
     ) {
         val app = context.applicationContext
         val payload = hashMapOf<String, Any?>(
@@ -68,6 +71,9 @@ object AlarmEvents {
             "snoozeMinutes" to snoozeMinutes,
             "label" to label,
             "at" to System.currentTimeMillis(),
+            "token" to token,
+            "automatic" to automatic,
+            "preview" to preview,
         )
         AlarmCallbacks.invoke(type, alarmId, snoozeMinutes)
         sendBroadcasts(app, payload)

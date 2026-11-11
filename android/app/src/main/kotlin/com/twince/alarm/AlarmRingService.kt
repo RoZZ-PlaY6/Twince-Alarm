@@ -32,9 +32,11 @@ class AlarmRingService : Service() {
     private var activeRequest: RingRequest? = null
     private var foreground = false
 
-    private val autoStop = Runnable {
-        val request = activeRequest ?: return@Runnable
-        complete(AlarmContract.EVENT_DISMISS, request, 0)
+    private val timeout by lazy {
+        RingTimeout(object : RingTimeout.Scheduler {
+            override fun post(task: Runnable, delayMillis: Long) { main.postDelayed(task, delayMillis) }
+            override fun remove(task: Runnable) { main.removeCallbacks(task) }
+        }, RingTimeout.DEFAULT_DURATION_MILLIS)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -42,37 +44,52 @@ class AlarmRingService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action ?: ACTION_START
         if (action != ACTION_START) {
-            val request = activeRequest ?: RingRequest.fromIntent(intent)
+            val request = activeRequest ?: run {
+                stopSelf(startId)
+                return START_NOT_STICKY
+            }
+            if (RingRequest.fromIntent(intent).token != request.token) return START_NOT_STICKY
             val minutes = intent?.getIntExtra(AlarmContract.EXTRA_SNOOZE_MINUTES, 0) ?: 0
             complete(actionToEvent(action), request, minutes)
             return START_NOT_STICKY
         }
 
         val request = RingRequest.fromIntent(intent)
+        if (request.token == 0L || RingState.isFinished(request.token)) {
+            if (activeRequest == null) stopSelf(startId)
+            return START_NOT_STICKY
+        }
         // Every foreground start must call startForeground, including duplicates.
         promote(buildNotification(request))
-        if (request.token != 0L && request.token == activeToken) {
-            return START_STICKY
-        }
+        if (request.token == activeToken) return START_NOT_STICKY
+        timeout.cancel()
+        activeRequest?.let { RingState.finish(it.token) }
         activeToken = request.token
         activeRequest = request
         holdWakes()
+        RingState.begin(request.token)
         player.start(request.soundUri, request.vibrate)
         launchActivity(request)
-        main.removeCallbacks(autoStop)
-        main.postDelayed(autoStop, RING_TIMEOUT_MS)
-        return START_STICKY
+        timeout.start {
+            if (activeRequest?.token == request.token) {
+                complete(AlarmContract.EVENT_DISMISS, request, 0, automatic = true)
+            }
+        }
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
-        main.removeCallbacks(autoStop)
+        timeout.cancel()
+        activeRequest?.let { RingState.finish(it.token) }
+        activeRequest = null
         player.stop()
         releaseWakes()
         super.onDestroy()
     }
 
-    private fun complete(event: String, request: RingRequest, snoozeMinutes: Int) {
-        main.removeCallbacks(autoStop)
+    private fun complete(event: String, request: RingRequest, snoozeMinutes: Int, automatic: Boolean = false) {
+        timeout.cancel()
+        RingState.finish(request.token)
         player.stop()
         releaseWakes()
         activeToken = 0L
@@ -88,13 +105,13 @@ class AlarmRingService : Service() {
                     }
                 }
                 else -> {
-                    if (request.alarmId > 0) AlarmScheduler.cancelSnooze(this, request.alarmId)
+                    if (!automatic && request.alarmId > 0) AlarmScheduler.cancelSnooze(this, request.alarmId)
                 }
             }
         } catch (error: SecurityException) {
             Log.e(AlarmContract.TAG, "Could not update the schedule after $event", error)
         }
-        AlarmEvents.publish(this, event, request.alarmId, snoozeMinutes, request.label)
+        AlarmEvents.publish(this, event, request.alarmId, snoozeMinutes, request.label, request.token, automatic, request.preview)
         if (foreground) {
             stopForeground(STOP_FOREGROUND_REMOVE)
             foreground = false
@@ -205,7 +222,7 @@ class AlarmRingService : Service() {
         if (partialWake?.isHeld != true) {
             partialWake = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "twince:alarm-cpu").apply {
                 setReferenceCounted(false)
-                acquire(RING_TIMEOUT_MS)
+                acquire(RingTimeout.DEFAULT_DURATION_MILLIS + 5_000L)
             }
         }
         if (screenWake?.isHeld != true) {
@@ -233,7 +250,6 @@ class AlarmRingService : Service() {
         const val ACTION_DISMISS = "com.twince.alarm.action.DISMISS"
         const val ACTION_SNOOZE = "com.twince.alarm.action.SNOOZE"
         const val ACTION_RESTART = "com.twince.alarm.action.RESTART"
-        private const val RING_TIMEOUT_MS = 10 * 60 * 1000L
 
         fun start(context: Context, request: RingRequest) {
             val intent = request.serviceIntent(context, ACTION_START)

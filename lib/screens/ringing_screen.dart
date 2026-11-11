@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -40,6 +41,8 @@ class RingingScreen extends StatefulWidget {
 }
 
 class _RingingScreenState extends State<RingingScreen> {
+  StreamSubscription<AlarmEvent>? _previewEvents;
+  int? _previewToken;
   @override
   void initState() {
     super.initState();
@@ -52,6 +55,7 @@ class _RingingScreenState extends State<RingingScreen> {
 
   @override
   void dispose() {
+    _previewEvents?.cancel();
     if (widget.playSoundOnOpen) {
       AlarmBridge.instance.stopPreview();
     }
@@ -83,7 +87,13 @@ class _RingingScreenState extends State<RingingScreen> {
 
   Future<void> _testLockScreen(BuildContext context) async {
     try {
-      await AlarmBridge.instance.previewRing(
+      _previewEvents ??= AlarmBridge.instance.events.listen((event) {
+        if (mounted && event.automatic && event.preview &&
+            event.token == _previewToken && _previewToken != null) {
+          _finish(this.context, 'Alarm dismissed');
+        }
+      }, onError: (_) {});
+      _previewToken = await AlarmBridge.instance.previewRing(
         id: widget.alarmId,
         hour: widget.hour,
         minute: widget.minute,
