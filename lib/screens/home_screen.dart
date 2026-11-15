@@ -4,14 +4,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:twince_alarm/models/alarm_item.dart';
 import 'package:twince_alarm/screens/edit_alarm_screen.dart';
+import 'package:twince_alarm/screens/backup_screen.dart';
 import 'package:twince_alarm/screens/ringing_screen.dart';
 import 'package:twince_alarm/services/alarm_bridge.dart';
 import 'package:twince_alarm/theme/twince_theme.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, this.connectPlatform = true});
+  const HomeScreen({super.key, this.connectPlatform = true, this.onRestored});
 
   final bool connectPlatform;
+  final Future<void> Function()? onRestored;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -19,6 +21,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final _bridge = AlarmBridge.instance;
+  final _backupTooltip = GlobalKey<TooltipState>();
   Timer? _clock;
   StreamSubscription<AlarmEvent>? _events;
   DateTime _now = DateTime.now();
@@ -57,7 +60,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && widget.connectPlatform && _bootstrapped) {
+    if (state == AppLifecycleState.resumed &&
+        widget.connectPlatform &&
+        _bootstrapped) {
       _reload();
       _drainEvents();
       _consumeClockIntent();
@@ -86,7 +91,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final permissions = await _bridge.permissions();
       if (!mounted) return;
       alarms.sort((a, b) {
-        final byTime = (a.hour * 60 + a.minute).compareTo(b.hour * 60 + b.minute);
+        final byTime = (a.hour * 60 + a.minute).compareTo(
+          b.hour * 60 + b.minute,
+        );
         return byTime != 0 ? byTime : a.id.compareTo(b.id);
       });
       setState(() {
@@ -132,7 +139,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (launch.skipUi) {
         final saved = await _bridge.upsert(draft);
         if (!mounted) return;
-        _toast(saved.scheduleError.isEmpty ? 'Alarm saved' : 'Allow exact alarms to schedule it');
+        _toast(
+          saved.scheduleError.isEmpty
+              ? 'Alarm saved'
+              : 'Allow exact alarms to schedule it',
+        );
         await _reload();
         return;
       }
@@ -199,21 +210,62 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   Row(
                     children: [
-                      const Text(
-                        'TWINCE',
-                        style: TextStyle(
-                          color: Color(0xFFD7F7FF),
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 6,
-                          shadows: [Shadow(color: TwinceColors.cyan, blurRadius: 16)],
+                      const Expanded(
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              'TWINCE',
+                              style: TextStyle(
+                                color: Color(0xFFD7F7FF),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 6,
+                                shadows: [
+                                  Shadow(
+                                    color: TwinceColors.cyan,
+                                    blurRadius: 16,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                         ),
                       ),
-                      const Spacer(),
+                      Focus(
+                        onFocusChange: (focused) {
+                          if (focused) {
+                            _backupTooltip.currentState?.ensureTooltipVisible();
+                          } else {
+                            Tooltip.dismissAllToolTips();
+                          }
+                        },
+                        child: Tooltip(
+                          key: _backupTooltip,
+                          message: 'Backup',
+                          preferBelow: true,
+                          child: IconButton(
+                            onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) =>
+                                    BackupScreen(onRestored: widget.onRestored),
+                              ),
+                            ),
+                            icon: const Icon(
+                              Icons.history,
+                              color: TwinceColors.cyan,
+                            ),
+                          ),
+                        ),
+                      ),
                       IconButton(
                         tooltip: 'Preview alarm screen',
                         onPressed: _openPreview,
-                        icon: const Icon(Icons.notifications_active_outlined, color: TwinceColors.cyan),
+                        icon: const Icon(
+                          Icons.notifications_active_outlined,
+                          color: TwinceColors.cyan,
+                        ),
                       ),
                     ],
                   ),
@@ -229,9 +281,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Text(formatDate(_now), style: const TextStyle(color: TwinceColors.muted, fontSize: 16)),
+                  Text(
+                    formatDate(_now),
+                    style: const TextStyle(
+                      color: TwinceColors.muted,
+                      fontSize: 16,
+                    ),
+                  ),
                   const SizedBox(height: 8),
-                  Text(_nextLine(next, use24), style: const TextStyle(color: TwinceColors.cyan, fontSize: 14)),
+                  Text(
+                    _nextLine(next, use24),
+                    style: const TextStyle(
+                      color: TwinceColors.cyan,
+                      fontSize: 14,
+                    ),
+                  ),
                   const SizedBox(height: 18),
                   if (!_permissions.exactAlarm)
                     _Banner(
@@ -247,7 +311,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       action: 'Enable',
                       onPressed: () async {
                         final granted = await _bridge.requestNotifications();
-                        if (!granted) _toast('Enable notifications for Twince Alarm in system settings');
+                        if (!granted) {
+                          _toast(
+                            'Enable notifications for Twince Alarm in system settings',
+                          );
+                        }
                         await _reload();
                       },
                     ),
@@ -260,27 +328,42 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ),
                   Row(
                     children: [
-                      const Text('Alarms', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+                      const Text(
+                        'Alarms',
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                       const SizedBox(width: 8),
-                      Text('${_alarms.length}', style: const TextStyle(color: TwinceColors.muted)),
+                      Text(
+                        '${_alarms.length}',
+                        style: const TextStyle(color: TwinceColors.muted),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 12),
                   if (_loading)
                     const Padding(
                       padding: EdgeInsets.only(top: 48),
-                      child: Center(child: CircularProgressIndicator(color: TwinceColors.cyan)),
+                      child: Center(
+                        child: CircularProgressIndicator(
+                          color: TwinceColors.cyan,
+                        ),
+                      ),
                     )
                   else if (_alarms.isEmpty)
                     const _EmptyAlarms()
                   else
-                    ..._alarms.map((alarm) => _AlarmCard(
-                          alarm: alarm,
-                          use24: use24,
-                          now: _now,
-                          onTap: () => _openEditor(alarm),
-                          onToggle: (value) => _toggle(alarm, value),
-                        )),
+                    ..._alarms.map(
+                      (alarm) => _AlarmCard(
+                        alarm: alarm,
+                        use24: use24,
+                        now: _now,
+                        onTap: () => _openEditor(alarm),
+                        onToggle: (value) => _toggle(alarm, value),
+                      ),
+                    ),
                 ],
               ),
               Positioned(
@@ -300,7 +383,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     for (final alarm in _alarms) {
       final when = nextTrigger(alarm, _now);
       if (when == null) continue;
-      if (best == null || when.isBefore(best.when)) best = (alarm: alarm, when: when);
+      if (best == null || when.isBefore(best.when)) {
+        best = (alarm: alarm, when: when);
+      }
     }
     return best;
   }
@@ -343,9 +428,18 @@ class _Banner extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+                Text(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
                 const SizedBox(height: 2),
-                Text(body, style: const TextStyle(color: TwinceColors.muted, fontSize: 13)),
+                Text(
+                  body,
+                  style: const TextStyle(
+                    color: TwinceColors.muted,
+                    fontSize: 13,
+                  ),
+                ),
               ],
             ),
           ),
@@ -367,7 +461,10 @@ class _EmptyAlarms extends StatelessWidget {
         children: [
           Icon(Icons.alarm_outlined, color: TwinceColors.cyan, size: 42),
           SizedBox(height: 12),
-          Text('No alarms yet', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+          Text(
+            'No alarms yet',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+          ),
           SizedBox(height: 6),
           Text(
             'Add an alarm that can reach you on the lock screen.',
@@ -402,8 +499,8 @@ class _AlarmCard extends StatelessWidget {
     final meta = snoozed
         ? 'Snoozed'
         : when == null
-            ? repeatLabel(alarm.repeatDays)
-            : '${whenLabel(when, now)} · ${repeatLabel(alarm.repeatDays)}';
+        ? repeatLabel(alarm.repeatDays)
+        : '${whenLabel(when, now)} · ${repeatLabel(alarm.repeatDays)}';
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Material(
@@ -417,7 +514,9 @@ class _AlarmCard extends StatelessWidget {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(20),
               border: Border.all(
-                color: alarm.enabled ? TwinceColors.cyan.withValues(alpha: 0.35) : TwinceColors.stroke,
+                color: alarm.enabled
+                    ? TwinceColors.cyan.withValues(alpha: 0.35)
+                    : TwinceColors.stroke,
               ),
             ),
             child: Row(
@@ -431,14 +530,25 @@ class _AlarmCard extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 32,
                           fontWeight: FontWeight.w300,
-                          color: alarm.enabled ? TwinceColors.text : TwinceColors.muted,
+                          color: alarm.enabled
+                              ? TwinceColors.text
+                              : TwinceColors.muted,
                           fontFeatures: const [FontFeature.tabularFigures()],
                         ),
                       ),
                       const SizedBox(height: 2),
-                      Text(alarm.label, style: const TextStyle(fontWeight: FontWeight.w600)),
+                      Text(
+                        alarm.label,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
                       const SizedBox(height: 2),
-                      Text(meta, style: const TextStyle(color: TwinceColors.muted, fontSize: 13)),
+                      Text(
+                        meta,
+                        style: const TextStyle(
+                          color: TwinceColors.muted,
+                          fontSize: 13,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -446,14 +556,20 @@ class _AlarmCard extends StatelessWidget {
                   value: alarm.enabled,
                   onChanged: onToggle,
                   thumbColor: WidgetStateProperty.resolveWith((states) {
-                    if (states.contains(WidgetState.selected)) return TwinceColors.bg0;
+                    if (states.contains(WidgetState.selected)) {
+                      return TwinceColors.bg0;
+                    }
                     return TwinceColors.muted;
                   }),
                   trackColor: WidgetStateProperty.resolveWith((states) {
-                    if (states.contains(WidgetState.selected)) return TwinceColors.cyan;
+                    if (states.contains(WidgetState.selected)) {
+                      return TwinceColors.cyan;
+                    }
                     return const Color(0xFF2A3148);
                   }),
-                  trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
+                  trackOutlineColor: const WidgetStatePropertyAll(
+                    Colors.transparent,
+                  ),
                 ),
               ],
             ),
@@ -474,9 +590,15 @@ class _AddButton extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        gradient: const LinearGradient(colors: [TwinceColors.blue, TwinceColors.cyan]),
+        gradient: const LinearGradient(
+          colors: [TwinceColors.blue, TwinceColors.cyan],
+        ),
         boxShadow: [
-          BoxShadow(color: TwinceColors.cyan.withValues(alpha: 0.45), blurRadius: 18, offset: const Offset(0, 6)),
+          BoxShadow(
+            color: TwinceColors.cyan.withValues(alpha: 0.45),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
         ],
       ),
       child: Material(

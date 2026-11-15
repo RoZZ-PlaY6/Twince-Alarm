@@ -58,9 +58,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             final cardHeight = innerHeight >= contentHeight
                 ? math.min(targetHeight, innerHeight)
                 : contentHeight;
-            final cardPadH = width < 360
-                ? 16.0
-                : 24.0 * math.min(scale, 1.25);
+            final cardPadH = width < 360 ? 16.0 : 24.0 * math.min(scale, 1.25);
             final cardPadV = math.min(
               32.0 * math.min(scale, 1.25),
               cardHeight * 0.14,

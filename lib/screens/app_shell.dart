@@ -19,6 +19,7 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   static const _alarmTab = 1;
   int _index = _alarmTab;
+  int _restoreGeneration = 0;
   late final PlanRepository _plans = widget.plans ?? PlanRepository();
 
   @override
@@ -28,10 +29,21 @@ class _AppShellState extends State<AppShell> {
       body: IndexedStack(
         index: _index,
         children: [
-          SettingsScreen(),
-          HomeScreen(connectPlatform: widget.connectPlatform),
+          const SettingsScreen(),
+          HomeScreen(
+            key: ValueKey('home-$_restoreGeneration'),
+            connectPlatform: widget.connectPlatform,
+            onRestored: () async {
+              await _plans.load();
+              if (mounted) setState(() => _restoreGeneration++);
+            },
+          ),
           const TimerScreen(),
-          PlanScreen(repository: _plans, active: _index == 3),
+          PlanScreen(
+            key: ValueKey('plan-$_restoreGeneration'),
+            repository: _plans,
+            active: _index == 3,
+          ),
         ],
       ),
       bottomNavigationBar: _ShellNav(
@@ -71,17 +83,84 @@ class _ShellNav extends StatelessWidget {
         child: SizedBox(
           key: const Key('shell-nav'),
           height: 64,
-          child: Row(
-            children: [
-              for (var i = 0; i < _destinations.length; i++)
-                Expanded(
-                  child: _NavButton(
-                    destination: _destinations[i],
-                    selected: index == i,
-                    onTap: () => onSelected(i),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              const pillWidth = 50.0;
+              final itemWidth = constraints.maxWidth / _destinations.length;
+              return Stack(
+                children: [
+                  AnimatedPositioned(
+                    key: const Key('shell-nav-pill'),
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeInOutCubic,
+                    left: itemWidth * index + (itemWidth - pillWidth) / 2,
+                    top: 6,
+                    width: pillWidth,
+                    height: 34,
+                    child: IgnorePointer(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF145868),
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                      ),
+                    ),
                   ),
-                ),
-            ],
+                  Row(
+                    children: [
+                      for (var i = 0; i < _destinations.length; i++)
+                        Expanded(
+                          child: _NavButton(
+                            destination: _destinations[i],
+                            selected: index == i,
+                            onTap: () => onSelected(i),
+                          ),
+                        ),
+                    ],
+                  ),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: IgnorePointer(
+                      child: Row(
+                        children: [
+                          for (var i = 0; i < _destinations.length; i++)
+                            Expanded(
+                              child: Center(
+                                child: Container(
+                                  key: ValueKey(
+                                    'nav-dot-${_destinations[i].label}',
+                                  ),
+                                  width: 4,
+                                  height: 4,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: index == i
+                                        ? TwinceColors.cyan
+                                        : TwinceColors.muted.withValues(
+                                            alpha: 0.4,
+                                          ),
+                                    boxShadow: index == i
+                                        ? [
+                                            BoxShadow(
+                                              color: TwinceColors.cyan
+                                                  .withValues(alpha: 0.7),
+                                              blurRadius: 5,
+                                            ),
+                                          ]
+                                        : null,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ),
       ),
@@ -100,38 +179,43 @@ class _NavButton extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
 
-  static const _pill = Color(0xFF145868);
-
   @override
   Widget build(BuildContext context) {
     final color = selected ? TwinceColors.cyan : TwinceColors.muted;
-    return InkWell(
-      onTap: onTap,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          DecoratedBox(
-            decoration: BoxDecoration(
-              color: selected ? _pill : Colors.transparent,
-              borderRadius: BorderRadius.circular(18),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-              child: Icon(destination.icon, size: 22, color: color),
-            ),
+    return Semantics(
+      selected: selected,
+      child: InkWell(
+        onTap: onTap,
+        overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+        splashFactory: NoSplash.splashFactory,
+        child: TweenAnimationBuilder<Color?>(
+          tween: ColorTween(begin: color, end: color),
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          builder: (context, animatedColor, child) => Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 6,
+                ),
+                child: Icon(destination.icon, size: 22, color: animatedColor),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                destination.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: animatedColor,
+                  fontSize: 12,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 4),
-          Text(
-            destination.label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: color,
-              fontSize: 12,
-              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

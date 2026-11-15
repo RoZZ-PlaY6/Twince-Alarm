@@ -11,11 +11,11 @@ void main() {
       PackageInfo.setMockInitialValues(
         appName: 'Twince Alarm',
         packageName: 'com.twince.alarm',
-        version: '1.0.0',
+        version: '1.0.8',
         buildNumber: '1',
         buildSignature: '',
       );
-      expect(await loadAppVersion(), '1.0.0');
+      expect(await loadAppVersion(), '1.0.8');
     },
   );
 
@@ -41,6 +41,6 @@ void main() {
       buildNumber: '1',
       buildSignature: '',
     );
-    expect(await loadAppVersion(), '1.0.0');
+    expect(await loadAppVersion(), '1.0.8');
   });
 }
