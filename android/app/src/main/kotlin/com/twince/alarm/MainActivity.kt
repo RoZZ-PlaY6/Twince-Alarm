@@ -10,6 +10,8 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.AlarmClock
 import android.provider.Settings
+import android.provider.OpenableColumns
+import android.provider.DocumentsContract
 import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -23,6 +25,38 @@ class MainActivity : FlutterActivity() {
     private val io = Executors.newSingleThreadExecutor()
     private var pendingPermission: MethodChannel.Result? = null
     private var clockIntentConsumed = false
+    private var pendingBackupResult: MethodChannel.Result? = null
+    private var pendingBackupContent: String? = null
+    private var selectedBackupUri: Uri? = null
+    private var selectedBackupFlags = 0
+    private val backupPrefs get() = getSharedPreferences("backup_document", MODE_PRIVATE)
+
+    private fun documentName(uri: Uri): String {
+        return contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+            if (it.moveToFirst()) it.getString(0) else null
+        } ?: error("Could not determine the document filename")
+    }
+
+    private fun backupNameValid(name: String) = name.startsWith("TWINCEALARM_") && name.endsWith(".json") &&
+        name.length > "TWINCEALARM_.json".length && !name.contains('/') && !name.contains('\\')
+
+    private fun currentUri(): Uri? = backupPrefs.getString("uri", null)?.let(Uri::parse)
+    private fun currentInfo(): Map<String, Any>? {
+        val uri = currentUri() ?: return null
+        val name = try { documentName(uri) } catch (_: Exception) { backupPrefs.getString("name", "Unknown file") ?: "Unknown file" }
+        return mapOf("name" to name)
+    }
+    private fun rememberDocument(uri: Uri, flags: Int) {
+        val granted = flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        try { contentResolver.takePersistableUriPermission(uri, granted) } catch (_: SecurityException) { }
+        val name = documentName(uri)
+        check(backupPrefs.edit().putString("uri", uri.toString()).putString("name", name).commit()) { "Could not remember the selected backup" }
+    }
+    private fun writeDocument(uri: Uri, content: String) {
+        val output = contentResolver.openOutputStream(uri, "wt") ?: error("Cannot open the selected destination")
+        output.use { it.write(content.toByteArray(Charsets.UTF_8)) }
+    }
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,6 +79,11 @@ class MainActivity : FlutterActivity() {
         // PackageInfo.fromPlatform() can resolve the app version.
         GeneratedPluginRegistrant.registerWith(flutterEngine)
         val messenger = flutterEngine.dartExecutor.binaryMessenger
+        MethodChannel(messenger, "com.twince.alarm/backup").setMethodCallHandler { call, result ->
+            try { handleBackup(call, result) } catch (error: Exception) {
+                result.error("backup_error", error.message ?: "Backup operation failed", null)
+            }
+        }
         MethodChannel(messenger, METHOD_CHANNEL).setMethodCallHandler { call, result ->
             try {
                 handle(call, result)
@@ -186,6 +225,123 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun handleBackup(call: MethodCall, result: MethodChannel.Result) {
+        when (call.method) {
+            "save", "choose" -> {
+                if (pendingBackupResult != null) { result.error("busy", "A document picker is already open.", null); return }
+                val saving = call.method == "save"
+                val picker = Intent(if (saving) Intent.ACTION_CREATE_DOCUMENT else Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "application/json"
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+                    if (saving) putExtra(Intent.EXTRA_TITLE, call.argument<String>("name"))
+                }
+                pendingBackupContent = if (saving) call.argument<String>("content") else null
+                pendingBackupResult = result
+                try { @Suppress("DEPRECATION") startActivityForResult(picker, if (saving) 7201 else 7202) }
+                catch (error: Exception) { pendingBackupResult = null; pendingBackupContent = null; throw error }
+            }
+            "current" -> result.success(currentInfo())
+            "useSelected" -> {
+                val uri = selectedBackupUri ?: error("The imported document is no longer selected")
+                rememberDocument(uri, selectedBackupFlags)
+                selectedBackupUri = null
+                result.success(currentInfo())
+            }
+            "saveCurrent" -> {
+                val uri = currentUri() ?: error("No current backup")
+                val content = call.argument<String>("content") ?: error("Missing backup content")
+                val writable = contentResolver.persistedUriPermissions.any { it.uri == uri && it.isWritePermission }
+                if (!writable || !backupNameValid(documentName(uri))) {
+                    result.success(false)
+                } else {
+                    writeDocument(uri, content)
+                    result.success(true)
+                }
+            }
+            "rename" -> {
+                val uri = currentUri() ?: error("No current backup")
+                val name = call.argument<String>("name") ?: error("Missing filename")
+                require(backupNameValid(name)) { "Filename must start with TWINCEALARM_ and end in .json" }
+                val flags = try {
+                    contentResolver.query(uri, arrayOf(DocumentsContract.Document.COLUMN_FLAGS), null, null, null)?.use {
+                        if (it.moveToFirst()) it.getInt(0) else 0
+                    } ?: 0
+                } catch (_: Exception) { 0 }
+                val writable = contentResolver.persistedUriPermissions.any { it.uri == uri && it.isWritePermission }
+                if (!writable || flags and DocumentsContract.Document.FLAG_SUPPORTS_RENAME == 0) {
+                    result.success(false)
+                } else {
+                    val renamed = DocumentsContract.renameDocument(contentResolver, uri, name) ?: error("The document provider could not rename this file")
+                    rememberDocument(renamed, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                    result.success(true)
+                }
+            }
+            "restore" -> {
+                val args = call.arguments as? Map<*, *> ?: error("Missing backup data")
+                val rawAlarms = args["alarms"] as? List<*> ?: error("Missing alarms")
+                val alarms = rawAlarms.map { AlarmStore.fromArgs(it as? Map<*, *> ?: error("Invalid alarm")) }
+                require(alarms.all { it.id > 0 } && alarms.map { it.id }.distinct().size == alarms.size) { "Invalid alarm IDs" }
+                val plans = args["planLibrary"] as? String ?: error("Missing plans")
+                val last = args["lastSound"] as? String ?: error("Missing sound")
+                val favorites = (args["favoriteSounds"] as? List<*>)?.map { it as? String ?: error("Invalid sound") } ?: error("Missing favorites")
+                AlarmStore.replaceBackup(this, alarms, plans, last, favorites)
+                var scheduled = true
+                try { AlarmScheduler.rescheduleAll(this) } catch (error: Exception) {
+                    Log.e(AlarmContract.TAG, "Restore saved but rescheduling failed", error)
+                    scheduled = false
+                }
+                val permissions = permissionStatus()
+                result.success(hashMapOf("exactAlarm" to (permissions["exactAlarm"] == true && scheduled), "notifications" to (permissions["notifications"] == true), "fullScreenIntent" to (permissions["fullScreenIntent"] == true)))
+            }
+            else -> result.notImplemented()
+        }
+    }
+
+    @Deprecated("Android document picker result")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != 7201 && requestCode != 7202) return
+        val result = pendingBackupResult ?: return
+        val content = pendingBackupContent
+        pendingBackupResult = null
+        pendingBackupContent = null
+        if (resultCode != RESULT_OK || data?.data == null) {
+            result.success(if (requestCode == 7201) false else null)
+            return
+        }
+        try {
+            val uri = data.data!!
+            if (requestCode == 7201) {
+                val name = documentName(uri)
+                require(backupNameValid(name)) { "Choose a filename starting with TWINCEALARM_ and ending in .json" }
+                writeDocument(uri, content ?: error("Missing backup"))
+                rememberDocument(uri, data.flags)
+                result.success(true)
+            } else {
+                val input = contentResolver.openInputStream(uri) ?: error("Cannot open the selected file")
+                val bytes = input.use { stream ->
+                    val output = java.io.ByteArrayOutputStream()
+                    val buffer = ByteArray(8192)
+                    while (true) {
+                        val count = stream.read(buffer)
+                        if (count < 0) break
+                        require(output.size() + count <= 10 * 1024 * 1024) { "Backup exceeds the 10 MB limit" }
+                        output.write(buffer, 0, count)
+                    }
+                    output.toByteArray()
+                }
+                val decoder = Charsets.UTF_8.newDecoder()
+                val decoded = decoder.decode(java.nio.ByteBuffer.wrap(bytes)).toString()
+                selectedBackupUri = uri
+                selectedBackupFlags = data.flags
+                result.success(decoded)
+            }
+        } catch (error: Exception) {
+            result.error("backup_file", error.message ?: "Could not access the selected file", null)
+        }
+    }
+
     private fun payload(saved: SaveResult): HashMap<String, Any?> {
         val map = AlarmStore.toMap(this, saved.alarm)
         map["scheduled"] = saved.scheduleError.isEmpty()
@@ -194,11 +350,13 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun permissionStatus(): HashMap<String, Boolean> {
-        val notifications = if (Build.VERSION.SDK_INT >= 33) {
+        val notificationPermission = if (Build.VERSION.SDK_INT >= 33) {
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
         } else {
             true
         }
+        val notifications = notificationPermission &&
+            (Build.VERSION.SDK_INT < Build.VERSION_CODES.N || getSystemService(NotificationManager::class.java).areNotificationsEnabled())
         val fullScreen = if (Build.VERSION.SDK_INT >= 34) {
             getSystemService(NotificationManager::class.java).canUseFullScreenIntent()
         } else {

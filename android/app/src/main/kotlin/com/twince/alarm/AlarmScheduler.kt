@@ -21,6 +21,8 @@ object AlarmScheduler {
 
     fun rescheduleAll(context: Context) {
         val app = context.applicationContext
+        // Recovery marker survives a process death during backup restoration.
+        for (id in AlarmStore.pendingBackupOldIds(app)) cancelAll(app, id)
         if (!canScheduleExact(app)) {
             Log.w(AlarmContract.TAG, "Exact alarms are not allowed; active alarms stay saved but unscheduled")
             return
@@ -47,6 +49,7 @@ object AlarmScheduler {
                 scheduleSnoozeAt(app, alarm, whenAt)
             }
         }
+        AlarmStore.finishBackupRecovery(app)
     }
 
     fun schedule(context: Context, alarm: TwinceAlarm) {

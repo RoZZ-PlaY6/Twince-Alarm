@@ -30,6 +30,7 @@ data class SnoozeRecord(
  */
 object AlarmStore {
     private const val PREFS = "twince_alarm_store"
+    private const val KEY_BACKUP_OLD_IDS = "backup_old_ids"
     private const val KEY_ALARMS = "alarms"
     private const val KEY_NEXT_ID = "next_id"
     private const val KEY_EVENTS = "events"
@@ -296,6 +297,48 @@ object AlarmStore {
         val array = JSONArray()
         uris.forEach { array.put(it) }
         prefs(context).edit().putString(KEY_FAVORITE_ALARM_SOUNDS, array.toString()).commit()
+    }
+
+    /** One preferences transaction replaces every restorable Android field. */
+    fun replaceBackup(context: Context, alarms: List<TwinceAlarm>, plans: String, last: String, favorites: List<String>) = synchronized(lock) {
+        val store = prefs(context)
+        val oldIds = (readAlarms(store).map { it.id } + pendingBackupOldIds(context)).distinct()
+        val previous = store.all.toMap()
+        val maxId = alarms.maxOfOrNull { it.id } ?: 0
+        val ok = store.edit()
+            .putString(KEY_ALARMS, writeAlarms(alarms))
+            .putInt(KEY_NEXT_ID, maxId + 1)
+            .putString(KEY_PLAN_LIBRARY, plans)
+            .putString(KEY_LAST_ALARM_SOUND, last)
+            .putString(KEY_FAVORITE_ALARM_SOUNDS, JSONArray(favorites).toString())
+            .putString(KEY_SNOOZES, "[]")
+            .putString(KEY_BACKUP_OLD_IDS, JSONArray(oldIds).toString())
+            .commit()
+        if (!ok) {
+            val rollback = store.edit().clear()
+            for ((key, value) in previous) {
+                when (value) {
+                    is String -> rollback.putString(key, value)
+                    is Int -> rollback.putInt(key, value)
+                    is Long -> rollback.putLong(key, value)
+                    is Boolean -> rollback.putBoolean(key, value)
+                    is Float -> rollback.putFloat(key, value)
+                    is Set<*> -> rollback.putStringSet(key, value.filterIsInstance<String>().toSet())
+                }
+            }
+            check(rollback.commit()) { "Restore failed and rollback could not be saved; restart the app and check your data." }
+            error("Could not save restored data; the previous data was restored.")
+        }
+    }
+
+    fun pendingBackupOldIds(context: Context): List<Int> = synchronized(lock) {
+        val raw = prefs(context).getString(KEY_BACKUP_OLD_IDS, null) ?: return@synchronized emptyList()
+        val array = JSONArray(raw)
+        (0 until array.length()).map { array.getInt(it) }
+    }
+
+    fun finishBackupRecovery(context: Context) = synchronized(lock) {
+        check(prefs(context).edit().remove(KEY_BACKUP_OLD_IDS).commit()) { "Could not finish restoring schedules." }
     }
 
     private fun readDaysArg(raw: Any?): List<Int> {
